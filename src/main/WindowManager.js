@@ -8,10 +8,13 @@
 // Click-through: by default the window ignores the mouse, so clicks fall
 // through to whatever is underneath. The renderer tells us when the cursor is
 // over the pet and we temporarily accept mouse input (see setClickThrough).
+//
+// Which area to cover is decided by DisplayManager; this class just applies it.
 
-import { BrowserWindow, screen } from 'electron';
+import { BrowserWindow } from 'electron';
 import path from 'node:path';
 import { createLogger } from './logger.js';
+import { rectText } from './DisplayManager.js';
 
 const log = createLogger('window');
 const appRoot = path.resolve(import.meta.dirname, '..', '..');
@@ -24,10 +27,10 @@ export class WindowManager {
     return this.#window && !this.#window.isDestroyed() ? this.#window : null;
   }
 
-  createPetWindow({ devTools = false } = {}) {
-    const display = screen.getPrimaryDisplay();
-    const { x, y, width, height } = display.workArea;
-    log.info(`Primary display ${display.id}: work area ${width}x${height} at (${x}, ${y}), scale ${display.scaleFactor}`);
+  // bounds: the work area to cover, in DIPs.
+  createPetWindow({ bounds, devTools = false }) {
+    const { x, y, width, height } = bounds;
+    log.info(`Creating pet window: ${rectText(bounds)}`);
 
     const win = new BrowserWindow({
       x, y, width, height,
@@ -85,6 +88,29 @@ export class WindowManager {
     });
 
     return win;
+  }
+
+  // Resize/move the window to cover a new work area (display changed). The
+  // page gets a normal `resize` event and the pet re-fits itself.
+  fitTo(bounds) {
+    const win = this.petWindow;
+    if (!win) return;
+    const target = {
+      x: Math.round(bounds.x),
+      y: Math.round(bounds.y),
+      width: Math.round(bounds.width),
+      height: Math.round(bounds.height),
+    };
+    win.setBounds(target);
+
+    // Around scaling changes Windows can adjust a window's size on its own;
+    // make sure we ended up where we asked, and retry once if not.
+    const actual = win.getBounds();
+    if (['x', 'y', 'width', 'height'].some((key) => actual[key] !== target[key])) {
+      log.warn(`Window landed at ${rectText(actual)} instead of ${rectText(target)}; retrying`);
+      win.setBounds(target);
+    }
+    log.info(`Pet window fitted to ${rectText(target)}`);
   }
 
   // enabled = true  -> clicks pass through the window to the desktop/apps below.

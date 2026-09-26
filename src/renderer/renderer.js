@@ -26,12 +26,16 @@ pet.addEventListener('contextmenu', (event) => {
 // The pet window covers the work area, so its size is the space the pet can use.
 const currentArea = () => ({ width: window.innerWidth, height: window.innerHeight });
 
-// Fires when the main process resizes the window (display changes, Phase 4).
+// Fires when the main process refits the window after a display change
+// (resolution, scaling, taskbar...). The pet re-clamps itself into the new
+// area; if the ground dropped away, it falls to the new bottom edge.
 window.addEventListener('resize', () => {
   if (!character) return;
   const area = currentArea();
-  log.debug(`Area: ${area.width}x${area.height}`);
+  if (area.width < 1 || area.height < 1) return; // transient size during a display change
   character.setArea(area);
+  const { x, y } = character.position;
+  log.debug(`Area: ${area.width}x${area.height}, pet at (${Math.round(x)}, ${Math.round(y)})`);
 });
 
 // --- Commands from the main process (context menu, later tray) ---------------

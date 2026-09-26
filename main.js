@@ -4,9 +4,10 @@
 // and owns the app lifecycle. Each window's page runs in a separate
 // "renderer process" (Chromium). They talk via IPC through preload.cjs.
 
-import { app } from 'electron';
+import { app, powerMonitor, screen } from 'electron';
 import { createLogger, logLevel } from './src/main/logger.js';
 import { WindowManager } from './src/main/WindowManager.js';
+import { DisplayManager, describeDisplay } from './src/main/DisplayManager.js';
 import { registerIpcHandlers } from './src/main/ipcHandlers.js';
 import { loadCharacter } from './src/main/CharacterLoader.js';
 
@@ -34,15 +35,23 @@ if (!app.requestSingleInstanceLock()) {
   app.quit();
 } else {
   const windowManager = new WindowManager();
+  const displayManager = new DisplayManager({ screen, powerMonitor, log: createLogger('display') });
 
   app.whenReady().then(() => {
     log.info(`Starting Desktop Pet ${app.getVersion()} (Electron ${process.versions.electron}, log level: ${logLevel})`);
     const character = loadCharacterSafely(CHARACTER_ID);
     registerIpcHandlers({ windowManager, getCharacter: () => character, isDev });
-    windowManager.createPetWindow({ devTools: isDev });
+
+    // Keep the pet window fitted to the screen's work area as it changes.
+    const display = displayManager.start((next) => windowManager.fitTo(next.workArea));
+    log.info(describeDisplay(display));
+    windowManager.createPetWindow({ bounds: display.workArea, devTools: isDev });
   });
 
   app.on('second-instance', () => log.info('Second launch attempt ignored'));
   app.on('window-all-closed', () => app.quit());
-  app.on('will-quit', () => log.info('Shutting down'));
+  app.on('will-quit', () => {
+    displayManager.stop();
+    log.info('Shutting down');
+  });
 }

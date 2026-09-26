@@ -2,7 +2,7 @@
 
 A tiny cartoon creature that lives on your Windows desktop. Built with Electron and vanilla JavaScript.
 
-> **Status:** Phase 3 — Pip walks, runs, jumps with gravity and moves to targets along the taskbar. It only moves when told to (dev menu); autonomous behavior arrives in Phases 8–9.
+> **Status:** Phase 4 — Pip walks, runs and jumps along the taskbar, and stays fitted to the screen when resolution, scaling or the taskbar change. It only moves when told to (dev menu); autonomous behavior arrives in Phases 8–9.
 
 ## Requirements
 
@@ -46,6 +46,7 @@ desktop-pet/
 ├── src/
 │   ├── main/                Main process (Node.js): windows, OS, IPC
 │   │   ├── WindowManager.js     Creates the transparent overlay window, click-through
+│   │   ├── DisplayManager.js    Watches the screen; reports work-area changes
 │   │   ├── CharacterLoader.js   Reads + validates character.json, fills in fallbacks
 │   │   ├── contextMenu.js       Native right-click menu
 │   │   ├── ipcHandlers.js       Validates and handles messages from the page
@@ -157,10 +158,33 @@ pet.placeAt(400, 0);               // teleport; above the ground it falls
 
 These become user settings in Phase 12.
 
+### Display handling
+
+The pet lives on the **primary display's work area** (the screen minus the taskbar).
+
+**DIPs, not pixels.** Electron measures in *device-independent pixels*. At 125% scaling, a 1920×1080 panel is 1536×864 DIPs. Window bounds, CSS pixels and `screen` values all use DIPs, so scaling is mostly automatic. The one place physical pixels matter is `CharacterView`, which snaps the pet to whole device pixels so it stays sharp.
+
+**When the display changes, the window follows:**
+
+```text
+Windows changes resolution / scaling / taskbar / wakes from sleep
+      │  screen 'display-metrics-changed', 'display-added/removed', powerMonitor 'resume'
+      ▼
+DisplayManager ── waits 250 ms for the burst to settle, re-reads the primary display,
+      │           ignores "changes" that change nothing, keeps the old area if Windows
+      │           briefly reports an unusable one
+      ▼
+WindowManager.fitTo(workArea) ──▶ page 'resize' event ──▶ character.setArea()
+      ▼
+Pet is pulled back inside; if the ground dropped away (e.g. taskbar auto-hide), it falls.
+```
+
+**Multi-monitor is intentionally not supported.** The pet always stays on the primary screen and never walks between monitors. If a second screen is plugged in or removed, the pet window just re-fits the primary display.
+
 ## Adding a character
 
 1. Create a folder `assets/characters/<id>/` (`id`: letters, digits, `-` or `_`).
-2. Add your frames: `.png`, `.svg`, `.webp`, `.gif` or `.jpg`, with transparent backgrounds, all drawn facing the same way.
+2. Add your frames: `.png`, `.svg`, `.webp`, `.gif` or `.jpg`, with transparent backgrounds, all drawn facing the same way. SVG stays sharp at any scaling. For bitmaps, draw at least **2× the display size** (e.g. 192×192 for a 96×96 pet) so they look crisp at 125–200% scaling.
 3. Add `character.json`:
 
 ```json
@@ -219,14 +243,15 @@ Invalid frames (missing file, wrong type, or a path outside the folder) are skip
 
 - **`does not provide an export named 'BrowserWindow'`**: the environment variable `ELECTRON_RUN_AS_NODE=1` is set, which makes Electron behave like plain Node. It is inherited when a process is launched from a VS Code *extension* (not the integrated terminal). Clear it with `Remove-Item Env:ELECTRON_RUN_AS_NODE` and try again.
 - **Black box instead of a transparent background**: some GPU drivers mishandle transparent windows. Update your graphics driver.
-- **Display changes**: the window is sized to the primary display at launch. Resolution, taskbar and monitor changes are handled in Phase 4. Until then, restart the pet after changing them.
+- **Multiple monitors**: not supported by design. The pet stays on the primary display.
+- **Fullscreen apps**: the pet is always on top, so it also shows over fullscreen videos and games. Settings for this come in Phase 12.
 
 ## Roadmap
 
 1. ✅ Basic desktop pet: transparent frameless window
 2. ✅ Character animation system
 3. ✅ Desktop movement
-4. Multi-monitor support
+4. ✅ Display handling: resolution, scaling, taskbar and sleep changes (single screen; multi-monitor intentionally skipped)
 5. Mouse interaction
 6. Desktop icons and folders
 7. Application window awareness
