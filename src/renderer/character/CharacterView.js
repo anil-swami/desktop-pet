@@ -16,6 +16,7 @@ export class CharacterView {
   #currentSrc = null;
   #translate = null;
   #preloaded = []; // keep decoded frames referenced so they stay in memory
+  #moveListeners = new Set();
 
   constructor(root) {
     this.#root = root;
@@ -63,6 +64,14 @@ export class CharacterView {
     if (translate === this.#translate) return;
     this.#translate = translate;
     this.#root.style.transform = translate;
+    for (const listener of this.#moveListeners) listener(x, y);
+  }
+
+  // Called whenever the pet's on-screen position changes (e.g. to keep a
+  // speech bubble on screen). Returns an unsubscribe function.
+  onMove(listener) {
+    this.#moveListeners.add(listener);
+    return () => this.#moveListeners.delete(listener);
   }
 
   showFrame(src, mirrored) {

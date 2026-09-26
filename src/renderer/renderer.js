@@ -11,6 +11,8 @@ import { ClickThrough } from './interaction/ClickThrough.js';
 import { MouseInteraction } from './interaction/MouseInteraction.js';
 import { DesktopInteraction } from './interaction/DesktopInteraction.js';
 import { BehaviorManager } from './behavior/BehaviorManager.js';
+import { DialogueManager } from './dialogue/DialogueManager.js';
+import { BubbleView } from './dialogue/BubbleView.js';
 import { playMovementDemo, playShowcase, stopDemos } from './dev/demos.js';
 
 const api = window.desktopPet;
@@ -25,10 +27,24 @@ let mouse = null;
 let desktop = null;
 let behavior = null;
 
+// Speech bubbles. The bubble reads the pet's position lazily (the pet is
+// created later) and re-checks the screen edges whenever the pet moves.
+const bubbles = new BubbleView({
+  pet,
+  getPosition: () => character?.position ?? { x: window.innerWidth / 2, y: window.innerHeight },
+  getPetSize: () => character?.size ?? { width: 96, height: 96 },
+});
+view.onMove(() => bubbles.reposition());
+const dialogue = new DialogueManager({ view: bubbles, ticker, random, log: createLogger('dialogue') });
+
+// No chatter over fullscreen apps, or while nobody is there to read it.
+const quiet = { fullscreen: false, away: false };
+const updateQuiet = () => dialogue.setQuiet(quiet.fullscreen || quiet.away);
+
 // The menu shows current settings and what the pet is doing, so send them along.
 pet.addEventListener('contextmenu', (event) => {
   event.preventDefault();
-  api?.showContextMenu({ mouseMode: mouse?.mode, behavior: behavior?.describe() });
+  api?.showContextMenu({ mouseMode: mouse?.mode, behavior: behavior?.describe(), speech: dialogue.enabled });
 });
 
 // The pet window covers the work area, so its size is the space the pet can use.
@@ -49,24 +65,36 @@ window.addEventListener('resize', () => {
 
 // --- What the user does with the mouse, as the behavior engine sees it --------
 
+// pause: autonomy waits (ms) · mood/boredom: personality changes · say: a dialogue topic
 const MOUSE_EFFECTS = {
   press:          { pause: 4000 },
-  click:          { mood: +6, boredom: -15 },
-  poked:          { mood: -8 },
-  grab:           { pause: 6000 },
-  'dropped-hard': { mood: -5 },
-  startle:        { pause: 3000 },
-  flee:           { pause: 4000 },
+  click:          { mood: +6, boredom: -15, say: 'click' },
+  poked:          { mood: -8, say: 'poked' },
+  grab:           { pause: 6000, say: 'grab' },
+  'dropped-hard': { mood: -5, say: 'dizzy' },
+  startle:        { pause: 3000, say: 'startle', priority: 'event' },
+  flee:           { pause: 4000, say: 'flee', priority: 'event' },
+  notice:         { say: 'mouseNear', priority: 'ambient', chance: 0.3 },
 };
 
 function onMouseInteraction(kind) {
-  stopDemos();
   const effect = MOUSE_EFFECTS[kind];
-  if (!effect || !behavior) return;
-  const { pause, ...changes } = effect;
-  if (pause) behavior.interrupt(`mouse: ${kind}`, pause);
-  if (Object.keys(changes).length) behavior.personality.adjust(changes);
+  if (!effect) return;
+  const { pause, say, priority = 'reply', chance, ...changes } = effect;
+  if (pause) {
+    stopDemos();
+    behavior?.interrupt(`mouse: ${kind}`, pause);
+  }
+  if (Object.keys(changes).length) behavior?.personality.adjust(changes);
+  if (say) dialogue.topic(say, { priority, chance });
 }
+
+// Comments on desktop icon moments.
+const DESKTOP_LINES = {
+  sat: (icon) => dialogue.topic('iconSit', { priority: 'event', chance: 0.6, data: { name: icon.name } }),
+  gone: () => dialogue.topic('iconGone', { priority: 'event' }),
+  covered: () => dialogue.topic('iconCovered', { priority: 'event' }),
+};
 
 // --- Commands and events from the main process ---------------------------------
 
@@ -87,17 +115,35 @@ const MANUAL_PAUSE_MS = 20_000;
 function handleCommand(command) {
   if (!character || typeof command?.type !== 'string') return;
 
-  // Events, not orders: they inform the behavior engine and nothing else.
+  // Events and settings, not orders: they don't interrupt what the pet is doing.
   if (command.type === 'app-changed') {
-    behavior?.onAppChanged(command.app && typeof command.app === 'object' ? command.app : null);
+    const app = command.app && typeof command.app === 'object' ? command.app : null;
+    quiet.fullscreen = app?.fullscreen === true;
+    updateQuiet();
+    behavior?.onAppChanged(app);
     return;
   }
   if (command.type === 'user-away') {
-    behavior?.setUserAway(command.away === true);
+    quiet.away = command.away === true;
+    updateQuiet(); // before the behavior reacts, so "Welcome back!" can show
+    behavior?.setUserAway(quiet.away);
     return;
   }
   if (command.type === 'autonomy') {
     behavior?.setEnabled(command.enabled === true);
+    return;
+  }
+  if (command.type === 'speech') {
+    dialogue.setEnabled(command.enabled === true);
+    return;
+  }
+  if (command.type === 'test-bubble') {
+    const samples = {
+      speech: () => dialogue.say('Hello! This is a speech bubble.', { priority: 'reply', key: `test-${Date.now()}` }),
+      thought: () => dialogue.think('Hmm... a thought bubble.', { priority: 'reply', key: `test-${Date.now()}` }),
+      long: () => dialogue.say('This is a much longer line, to check that the bubble wraps nicely and stays readable.', { priority: 'reply', key: `test-${Date.now()}` }),
+    };
+    samples[command.style]?.();
     return;
   }
 
@@ -212,6 +258,7 @@ async function start() {
     ticker,
     random: chance,
     log: createLogger('desktop'),
+    onEvent: (kind, icon) => DESKTOP_LINES[kind]?.(icon),
   });
 
   behavior = new BehaviorManager({
@@ -221,23 +268,26 @@ async function start() {
     random,
     log: createLogger('behavior'),
     isBusy: () => mouse.busy,
+    speak: ({ topic, ...options }) => dialogue.topic(topic, options),
   });
 
   api.onCommand(handleCommand);
   // Catch up on what happened while we were loading (the app in front, user away?).
   try {
     const context = await api.getContext();
-    if (context?.app) behavior.onAppChanged(context.app);
-    if (context?.userAway) behavior.setUserAway(true);
+    if (context?.app) handleCommand({ type: 'app-changed', app: context.app });
+    if (context?.userAway) handleCommand({ type: 'user-away', away: true });
   } catch (err) {
     log.warn(`Could not get the current context: ${err.message}`);
   }
+  dialogue.topic('greeting', { priority: 'event' });
   behavior.start();
   log.info(`Character "${data.name}" ready (${character.animationNames.length} animations), area ${area.width}x${area.height}`);
 }
 
 // Stop the loop and all timers if the page is ever torn down.
 window.addEventListener('beforeunload', () => {
+  dialogue.dispose();
   behavior?.dispose();
   desktop?.dispose();
   mouse?.dispose();

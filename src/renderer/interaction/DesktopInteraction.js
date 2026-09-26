@@ -35,19 +35,22 @@ export class DesktopInteraction {
   #log;
   #random;
   #options;
+  #onEvent;
 
   #token = 0;          // bumped whenever the current plan is abandoned
   #visit = null;       // { icon, token } while sitting on an icon
   #checks = 0;
   #stopChecking = null;
 
-  constructor({ character, getIcons, ticker, log = silentLog, random = Math.random, options = {} }) {
+  // onEvent(kind, icon): 'sat' | 'gone' | 'covered' — e.g. for the pet to comment.
+  constructor({ character, getIcons, ticker, log = silentLog, random = Math.random, options = {}, onEvent = () => {} }) {
     this.#character = character;
     this.#getIcons = getIcons;
     this.#ticker = ticker;
     this.#log = log;
     this.#random = random;
     this.#options = { ...DESKTOP_DEFAULTS, ...options };
+    this.#onEvent = onEvent;
   }
 
   // The icon the pet is sitting on, or null.
@@ -130,6 +133,7 @@ export class DesktopInteraction {
     this.#checks = 0;
     this.#character.play('sit');
     this.#log.info(`Sitting on "${icon.name}"`);
+    this.#onEvent('sat', icon);
     this.#scheduleCheck(token);
     return true;
   }
@@ -209,11 +213,13 @@ export class DesktopInteraction {
       if (problem === 'gone') {
         this.#log.info(`"${visit.icon.name}" disappeared!`);
         this.cancel(); // no platform any more: the pet falls
+        this.#onEvent('gone', visit.icon);
         return;
       }
       if (problem) {
         this.#log.info(`Leaving "${visit.icon.name}": ${problem}`);
         this.leave();
+        if (problem === 'a window covered it') this.#onEvent('covered', visit.icon);
         return;
       }
     }

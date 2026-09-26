@@ -30,6 +30,7 @@ contextBridge.exposeInMainWorld('desktopPet', {
   // Only known fields are copied, as plain values.
   showContextMenu: (state) => ipcRenderer.send(Channels.SHOW_CONTEXT_MENU, {
     mouseMode: text(state?.mouseMode, 20),
+    speech: typeof state?.speech === 'boolean' ? state.speech : null,
     behavior: state?.behavior ? {
       enabled: state.behavior.enabled === true,
       state: text(state.behavior.state, 20),

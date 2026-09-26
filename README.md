@@ -2,7 +2,7 @@
 
 A tiny cartoon creature that lives on your Windows desktop. Built with Electron and vanilla JavaScript.
 
-> **Status:** Phases 1–9 — Pip lives on its own: it wanders, dashes, hops, sits and naps, and hops between desktop icons whenever your desktop is visible. It notices which app you're using, reacts to your cursor, and can be dragged and thrown. Speech bubbles come next (Phase 10).
+> **Status:** Phases 1–10 — Pip lives on its own: it wanders, dashes, hops, sits and naps, and hops between desktop icons whenever your desktop is visible. It notices which app you're using, reacts to your cursor, can be dragged and thrown, and talks in speech and thought bubbles.
 
 ## Requirements
 
@@ -26,7 +26,7 @@ npm run build:helper   # force a rebuild of the Windows helper (normally automat
 
 `npm start` and `npm run dev` first compile the small Windows helper (`build/windows-helper.exe`) if its source changed. See [Windows helper](#windows-helper).
 
-**Right-click menu:** what Pip is doing, **Live on its own** (autonomy on/off), **Notice which app I use**, and **Quit**. In dev mode it adds energy and mood, plus **Mouse** (ignore / curious / follow / shy), **Desktop icons** (visit one, hop down), **Movement**, **Play animation**, **Play all animations** and **Open DevTools**.
+**Right-click menu:** what Pip is doing, **Live on its own** (autonomy on/off), **Speech bubbles**, **Notice which app I use**, and **Quit**. In dev mode it adds energy and mood, plus **Mouse** (ignore / curious / follow / shy), **Desktop icons** (visit one, hop down), **Movement**, **Play animation**, **Play all animations**, **Test speech bubble** and **Open DevTools**.
 
 Set the log level explicitly with `PET_LOG_LEVEL` (`debug`, `info`, `warn`, `error`, `silent`):
 
@@ -78,13 +78,17 @@ desktop-pet/
 │       │   ├── BehaviorScheduler.js Weighted choice with priorities and cooldowns
 │       │   ├── Personality.js       Energy, boredom, mood, curiosity
 │       │   └── activities.js        What the pet can decide to do
+│       ├── dialogue/
+│       │   ├── lines.js             Everything Pip can say, by topic
+│       │   ├── DialogueManager.js   When a line may appear: priorities, gaps, cooldowns (no DOM)
+│       │   └── BubbleView.js        The bubble element: placement, speech/thought style
 │       ├── interaction/
 │       │   ├── ClickThrough.js      Clickable pet, click-through everywhere else
 │       │   ├── MouseInteraction.js  Noticing the cursor, clicks, drag and throw
 │       │   └── DesktopInteraction.js  Visiting desktop icons: walk, leap, sit, hop down
 │       ├── dev/demos.js         "Play all animations" and "Movement demo"
 │       ├── index.html
-│       └── styles/              main.css (page), character.css (pet + motions)
+│       └── styles/              main.css (page), character.css (pet + motions), bubble.css
 ├── assets/characters/default/   Pip: character.json + 13 SVG frames
 └── tests/                   Unit tests (node --test)
 ```
@@ -218,11 +222,44 @@ Pip decides what to do by itself. There's no giant if/else: each **activity** sa
 
 The logs show every decision: `State: IDLE → WALKING (wander)`.
 
+### Speech bubbles
+
+Pip talks in small comic bubbles: **speech** (rounded, with a tail) or **thought** (a cloud with little dots, e.g. "Zzz..." while napping).
+
+```js
+dialogue.show("I'm bored...");                      // a specific line
+dialogue.topic('bored', { priority: 'ambient' });   // a random line from lines.js
+dialogue.think('Zzz...');                           // a thought bubble
+```
+
+**Not constantly.** `DialogueManager` decides whether a line may appear. Lines that don't pass are dropped, not queued, because a late line is a stale line.
+
+| Priority | Used for | Needs since the last bubble | Same topic again after |
+|---|---|---|---|
+| `reply` | answering you: clicks, grabs, "Welcome back!" | nothing, shows at once | 1.2 s |
+| `event` | app switches, icon moments, "Zzz..." | 4 s | 15 s |
+| `ambient` | idle chatter: "I'm bored...", "Wheee!" | 25 s, and only by chance | 90 s |
+
+- A bubble never replaces a more important one.
+- A topic never repeats the same line twice in a row.
+- A bubble stays up for 2.2–6 s, depending on length.
+- **Quiet mode:** while a fullscreen app runs or you're away, only replies appear.
+- **Speech bubbles** in the right-click menu turns them off.
+- Chattiness becomes a setting in Phase 12.
+
+**Placement and accessibility** (`BubbleView`):
+- The bubble lives *inside* the pet element, so it moves with Pip for free.
+- Near a screen edge it slides inward, and the tail keeps pointing at Pip. With no room above (e.g. Pip on a high icon), it goes below.
+- It is **click-through** (`pointer-events: none`), so it never blocks a click.
+- `role="status"` with `aria-live` lets screen readers announce it. It uses dark text on light paper with a strong outline, readable on any wallpaper.
+- It honours reduced-motion settings.
+- One element is reused for every bubble, with the pop-in and fade done in CSS: no work while no bubble shows.
+
 ### App awareness
 
 Pip notices which app is in front and reacts, with cooldowns so it's charming rather than annoying:
 
-| You switch to | Pip | Would say (bubbles in Phase 10) |
+| You switch to | Pip | Might say |
 |---|---|---|
 | A code editor (VS Code, Visual Studio, JetBrains...) | happy, then likes to sit with you | "Back to coding?" |
 | A browser | looks around | "What are we reading?" |
@@ -339,6 +376,24 @@ An activity is one object in [`activities.js`](src/renderer/behavior/activities.
 
 Behaviors are tested in plain Node with a seeded `Random` and a fake clock (see `tests/behaviorManager.test.js`).
 
+Activities can also talk: `run({ say, think })`, e.g. `say('bored', { chance: 0.5 })`. Lines offered this way are idle chatter (`ambient`), so the dialogue rules often keep them quiet. That's intended.
+
+## Adding a dialogue
+
+All lines live in [`lines.js`](src/renderer/dialogue/lines.js), grouped by topic:
+
+```js
+iconSit: ['Comfy!', 'Nice spot!', 'Ooh, "{name}"!'],
+```
+
+- **More variety:** add a line to an existing topic. It's picked at random, never twice in a row.
+- **Placeholders:** `{name}` is filled in by the caller (long values are shortened). Lines whose values weren't given are skipped automatically.
+- **A new topic:** add it to `lines.js`, then ask for it where it should happen:
+  - in an activity: `say('myTopic', { chance: 0.3 })`
+  - for a user reaction in `renderer.js`: `dialogue.topic('myTopic', { priority: 'reply' })`
+  - for an app reaction: `topic: 'myTopic'` in `APP_REACTIONS` (BehaviorManager.js)
+- Pick the priority by who it's for: `reply` answers the user, `event` comments on something that happened, `ambient` is idle chatter.
+
 ## Adding a character
 
 1. Create a folder `assets/characters/<id>/` (`id`: letters, digits, `-` or `_`).
@@ -435,7 +490,7 @@ Everything stays on your PC and in memory: nothing is logged in bulk, stored or 
 7. ✅ Application window awareness
 8. ✅ Personality engine
 9. ✅ Autonomous behavior (8 and 9 were brought forward together with 7)
-10. Speech bubbles
+10. ✅ Speech bubbles
 11. Character interaction and pet menu
 12. Settings
 13. System tray

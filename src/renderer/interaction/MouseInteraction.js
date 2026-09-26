@@ -217,6 +217,7 @@ export class MouseInteraction {
     if (!this.#noticed && distance <= this.#options.noticeDistance) {
       this.#noticed = true;
       this.#log.debug(`Noticed the mouse ${Math.round(distance)}px away`);
+      if (this.#isFree()) this.#onInteract('notice');
     } else if (this.#noticed && distance > this.#options.forgetDistance) {
       this.#noticed = false;
       this.#log.debug('Lost interest in the mouse');

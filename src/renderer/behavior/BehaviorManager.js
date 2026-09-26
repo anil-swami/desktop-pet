@@ -19,15 +19,16 @@ import { ACTIVITIES } from './activities.js';
 import { BehaviorScheduler } from './BehaviorScheduler.js';
 import { Personality } from './Personality.js';
 
+// What the pet does when you switch apps. `topic` names the lines in dialogue/lines.js.
 export const APP_REACTIONS = Object.freeze({
-  code:     { state: 'HAPPY', animation: 'happy', say: ['Back to coding?', "Let's code!"], cooldownMs: 5 * 60_000 },
-  browser:  { state: 'CURIOUS', look: true, say: ['What are we reading?', 'Surfing time!'], cooldownMs: 5 * 60_000 },
-  terminal: { state: 'SURPRISED', animation: 'surprised', say: ['Hacker mode!'], cooldownMs: 5 * 60_000 },
-  chat:     { state: 'HAPPY', animation: 'happy', say: ['Say hi from me!'], cooldownMs: 5 * 60_000 },
-  media:    { state: 'HAPPY', animation: 'happy', say: ['Movie time?'], cooldownMs: 5 * 60_000 },
-  office:   { state: 'THINKING', animation: 'confused', say: ['Work, work...'], cooldownMs: 5 * 60_000 },
-  folder:   { state: 'SURPRISED', animation: 'surprised', say: ["What's in there?", 'A folder!'], cooldownMs: 30_000, onlyNew: true },
-  desktop:  { state: 'HAPPY', animation: 'happy', say: ['Desktop time!', 'Icons!'], cooldownMs: 2 * 60_000 },
+  code:     { state: 'HAPPY', animation: 'happy', topic: 'appCode', cooldownMs: 5 * 60_000 },
+  browser:  { state: 'CURIOUS', look: true, topic: 'appBrowser', cooldownMs: 5 * 60_000 },
+  terminal: { state: 'SURPRISED', animation: 'surprised', topic: 'appTerminal', cooldownMs: 5 * 60_000 },
+  chat:     { state: 'HAPPY', animation: 'happy', topic: 'appChat', cooldownMs: 5 * 60_000 },
+  media:    { state: 'HAPPY', animation: 'happy', topic: 'appMedia', cooldownMs: 5 * 60_000 },
+  office:   { state: 'THINKING', animation: 'confused', topic: 'appOffice', cooldownMs: 5 * 60_000 },
+  folder:   { state: 'SURPRISED', animation: 'surprised', topic: 'appFolder', cooldownMs: 30_000, onlyNew: true },
+  desktop:  { state: 'HAPPY', animation: 'happy', topic: 'appDesktop', cooldownMs: 2 * 60_000 },
 });
 
 const REACTION_GAP_MS = 30_000;       // at most one app reaction per 30 s
@@ -47,6 +48,7 @@ export class BehaviorManager {
   #log;
   #now;
   #isBusy;
+  #speak;
 
   #running = false;
   #enabled = true;
@@ -76,6 +78,8 @@ export class BehaviorManager {
     log = silentLog,
     now = () => performance.now(),
     isBusy = () => false,
+    // speak({ topic, style, priority, chance, ... }): show a line (DialogueManager.topic).
+    speak = () => {},
   }) {
     this.#character = character;
     this.#desktop = desktop;
@@ -86,6 +90,7 @@ export class BehaviorManager {
     this.#log = log;
     this.#now = now;
     this.#isBusy = isBusy;
+    this.#speak = speak;
     this.#scheduler = new BehaviorScheduler({ random, now });
   }
 
@@ -160,7 +165,7 @@ export class BehaviorManager {
         name: 'welcome-back',
         state: 'HAPPY',
         kind: 'react',
-        say: 'Welcome back!',
+        speech: { topic: 'welcomeBack', priority: 'reply' },
         async run({ character }) {
           await character.play('wake', { restart: true });
           await character.play('happy', { restart: true });
@@ -238,7 +243,7 @@ export class BehaviorManager {
   async #perform(activity, token, context) {
     this.#current = activity;
     this.#setState(activity.state, activity.name);
-    if (activity.say) this.#log.info(`(would say "${activity.say}") — speech bubbles arrive in Phase 10`);
+    if (activity.speech) this.#speak(activity.speech);
     const started = this.#now();
     try {
       if (activity.needsFloor && this.#character.standingOn !== null && this.#desktop) {
@@ -253,6 +258,9 @@ export class BehaviorManager {
         wait: (ms) => this.#wait(ms, token),
         active: () => token === this.#token,
         spot: (min, max) => this.#spot(min, max),
+        // Idle chatter by default; the dialogue rules decide if it actually shows.
+        say: (topic, options = {}) => this.#speak({ topic, priority: 'ambient', ...options }),
+        think: (topic, options = {}) => this.#speak({ topic, priority: 'ambient', ...options, style: 'thought' }),
       });
     } catch (err) {
       this.#log.error(`Activity "${activity.name}" failed: ${err.message}`);
@@ -299,13 +307,12 @@ export class BehaviorManager {
     this.#reactedAt.set(info.category, now);
     this.#personality.adjust({ curiosity: +8, boredom: -10 });
 
-    const say = this.#random.pick(spec.say);
     this.#log.info(`Noticed ${info.category === 'folder' ? 'a folder being opened' : `${info.app} (${info.category})`}`);
     return {
       name: `react-${info.category}`,
       state: spec.state,
       kind: 'react',
-      say,
+      speech: { topic: spec.topic, priority: 'event' },
       async run({ character, wait }) {
         await character.whenLanded(); // landing would replace the animation
         if (spec.animation) {

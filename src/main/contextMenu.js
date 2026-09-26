@@ -22,7 +22,7 @@ export const MOUSE_MODE_ITEMS = Object.freeze([
 const MAX_ICONS_IN_MENU = 15;
 
 export function buildPetMenu({
-  character, isDev, mouseMode, behavior, appAwareness, desktopIcons, sendCommand, setNoticeApps, openDevTools,
+  character, isDev, mouseMode, speech, behavior, appAwareness, desktopIcons, sendCommand, setNoticeApps, openDevTools,
 }) {
   const name = character?.name ?? 'Desktop Pet';
   const doing = behavior?.state ? ` · ${behavior.state.toLowerCase().replaceAll('_', ' ')}` : '';
@@ -37,6 +37,12 @@ export function buildPetMenu({
       type: 'checkbox',
       checked: behavior?.enabled ?? true,
       click: () => sendCommand({ type: 'autonomy', enabled: !(behavior?.enabled ?? true) }),
+    },
+    {
+      label: 'Speech bubbles',
+      type: 'checkbox',
+      checked: speech,
+      click: () => sendCommand({ type: 'speech', enabled: !speech }),
     },
     {
       label: appAwareness.available ? 'Notice which app I use' : 'Notice which app I use (unavailable)',
@@ -126,6 +132,14 @@ function developerItems({ character, mouseMode, desktopIcons, sendCommand, openD
           command(animation.aliasOf ? `${name}  (uses ${animation.aliasOf})` : name, { type: 'play-animation', name })),
       },
       command('Play all animations', { type: 'showcase' }),
+      {
+        label: 'Test speech bubble',
+        submenu: [
+          command('Speech', { type: 'test-bubble', style: 'speech' }),
+          command('Thought', { type: 'test-bubble', style: 'thought' }),
+          command('Long text', { type: 'test-bubble', style: 'long' }),
+        ],
+      },
     );
   }
   items.push({ label: 'Open DevTools', click: openDevTools });
