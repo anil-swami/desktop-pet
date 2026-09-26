@@ -2,7 +2,9 @@
 
 A tiny cartoon creature that lives on your Windows desktop. Built with Electron and vanilla JavaScript.
 
-> **Status:** Phases 1–12 — Pip lives on its own: it wanders, dashes, hops, sits and naps, and hops between desktop icons whenever your desktop is visible. It notices which app you're using, talks in speech and thought bubbles, and you can pet it, feed it, throw it (onto icons too), and tell it to come, sit, sleep or stop. A settings window saves your preferences.
+![Pip, the desktop pet, in nine poses: chilling, wandering, zoomies, hopping, sitting, napping, happy, startled and confused](docs/images/pip-poses.png)
+
+> **Status:** Phases 1–13. Pip lives on its own: it wanders, dashes, hops, sits and naps, and hops between desktop icons whenever your desktop is visible. It notices which app you're using and talks in speech and thought bubbles. You can pet it, feed it, throw it (onto icons too), and tell it to come, sit, sleep or stop. A settings window saves your preferences, and a tray icon lets you pause, hide or exit it.
 
 ## Requirements
 
@@ -163,8 +165,10 @@ desktop-pet/
 │       └── styles/              main.css, character.css (pet + motions), bubble.css, effects.css
 ├── assets/characters/default/   Pip: character.json + 13 SVG frames
 ├── assets/icons/            Tray and window icons (generated from pet-icon.svg)
+├── docs/images/             README picture and the GitHub social preview card
 ├── assets/items/treat.svg   The cookie you can feed Pip
-└── tests/                   Unit tests (node --test)
+├── tests/                   Unit tests (node --test)
+└── LICENSE                  MIT
 ```
 
 ### The two kinds of process
@@ -636,3 +640,7 @@ Everything stays on your PC and in memory: nothing is logged in bulk, stored or 
 13. ✅ System tray (pause, hide, settings, change character, exit)
 14. Start with Windows
 15. Performance pass
+
+## License
+
+[MIT](LICENSE) © 2026 Anil Swami. You may use, copy, modify and share this project, including commercially, as long as the copyright notice stays with it.
