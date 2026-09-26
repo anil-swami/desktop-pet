@@ -36,16 +36,17 @@ body.is-dragging .pet {
    Motions: optional CSS movement layered on top of the frames, chosen by an
    animation's "motion" in character.json. Transform-only, so they run on the
    GPU compositor without layout or repaint. Unknown names simply do nothing.
+   Durations divide by --motion-speed (settings: Animation speed).
    --------------------------------------------------------------------------- */
 
-.pet[data-motion="breathe"] .pet__sprite      { animation: pet-breathe 3.2s ease-in-out infinite; }
-.pet[data-motion="breathe-slow"] .pet__sprite { animation: pet-breathe-deep 4.8s ease-in-out infinite; }
-.pet[data-motion="bob"] .pet__sprite          { animation: pet-bob 0.2s ease-in-out infinite; }
-.pet[data-motion="bounce"] .pet__sprite       { animation: pet-bounce 0.2s ease-in-out infinite; }
-.pet[data-motion="hop"] .pet__sprite          { animation: pet-hop 0.45s ease-out 2; }
-.pet[data-motion="jolt"] .pet__sprite         { animation: pet-jolt 0.35s ease-out 1; }
-.pet[data-motion="tilt"] .pet__sprite         { animation: pet-tilt 0.8s ease-in-out infinite alternate; }
-.pet[data-motion="flail"] .pet__sprite        { animation: pet-flail 0.18s linear infinite alternate; }
+.pet[data-motion="breathe"] .pet__sprite      { animation: pet-breathe calc(3.2s / var(--motion-speed, 1)) ease-in-out infinite; }
+.pet[data-motion="breathe-slow"] .pet__sprite { animation: pet-breathe-deep calc(4.8s / var(--motion-speed, 1)) ease-in-out infinite; }
+.pet[data-motion="bob"] .pet__sprite          { animation: pet-bob calc(0.2s / var(--motion-speed, 1)) ease-in-out infinite; }
+.pet[data-motion="bounce"] .pet__sprite       { animation: pet-bounce calc(0.2s / var(--motion-speed, 1)) ease-in-out infinite; }
+.pet[data-motion="hop"] .pet__sprite          { animation: pet-hop calc(0.45s / var(--motion-speed, 1)) ease-out 2; }
+.pet[data-motion="jolt"] .pet__sprite         { animation: pet-jolt calc(0.35s / var(--motion-speed, 1)) ease-out 1; }
+.pet[data-motion="tilt"] .pet__sprite         { animation: pet-tilt calc(0.8s / var(--motion-speed, 1)) ease-in-out infinite alternate; }
+.pet[data-motion="flail"] .pet__sprite        { animation: pet-flail calc(0.18s / var(--motion-speed, 1)) linear infinite alternate; }
 
 @keyframes pet-breathe {
   0%, 100% { transform: scale(1, 1); }
@@ -89,8 +90,15 @@ body.is-dragging .pet {
   to   { transform: rotate(5deg); }
 }
 
-@media (prefers-reduced-motion: reduce) {
-  .pet__sprite { animation: none !important; }
+/* Settings: Reduce motion (the app sets this class, following Windows by default). */
+.reduce-motion .pet__sprite {
+  animation: none !important;
+}
+
+/* While you're away (settings: Rest when I'm away): pause all looping effects. */
+.is-resting .pet__sprite,
+.is-resting .effect {
+  animation-play-state: paused !important;
 }
 
 /* Shown only if no character could be loaded at all. */

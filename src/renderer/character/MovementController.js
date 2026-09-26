@@ -30,6 +30,7 @@ export const MOVEMENT_DEFAULTS = Object.freeze({
 
 const ARRIVE_EPSILON = 0.5;
 const JUMP_CLEARANCE = 30; // an aimed jump peaks this far above the higher of start and target
+const GENTLE_DROP = 300;   // px/s: released slower than this over a platform = put down on it
 const silentLog = { debug() {}, info() {}, warn() {}, error() {} };
 
 const isSurface = (s) => s && typeof s.id === 'string'
@@ -112,15 +113,24 @@ export class MovementController {
     return this.#area.height;
   }
 
+  // Change speeds etc. on the fly (settings), e.g. { walkSpeed: 80 }.
+  setOptions(options) {
+    for (const [key, value] of Object.entries(options)) {
+      if (key in MOVEMENT_DEFAULTS && Number.isFinite(value) && value > 0) this.#options[key] = value;
+    }
+  }
+
   get standingOn() {
     return this.#standingOn;
   }
 
-  // Replace the platforms. If the one under the pet is gone or has moved, it falls.
+  // Replace the platforms: [{ id, left, right, top, depth? }]. `depth` is how far
+  // below the top a released pet still counts as "put on it" (e.g. an icon's height).
+  // If the platform under the pet is gone or has moved, it falls.
   setSurfaces(surfaces) {
     this.#surfaces = (Array.isArray(surfaces) ? surfaces : [])
       .filter(isSurface)
-      .map(({ id, left, right, top }) => ({ id, left, right, top }));
+      .map(({ id, left, right, top, depth }) => ({ id, left, right, top, depth: Number.isFinite(depth) ? depth : 0 }));
     if (this.#grounded && this.#standingOn !== null) {
       const surface = this.#surfaces.find((s) => s.id === this.#standingOn);
       const stillThere = surface && surface.top === this.#y && this.#x >= surface.left && this.#x <= surface.right;
@@ -276,6 +286,18 @@ export class MovementController {
       this.#syncAnimation();
       return Promise.resolve(true);
     }
+    // Gently put down overlapping a platform (e.g. on an icon): set it on top.
+    const holder = Math.abs(vx) < GENTLE_DROP && Math.abs(vy) < GENTLE_DROP ? this.#surfaceHolding() : null;
+    if (holder) {
+      this.#y = holder.top;
+      this.#grounded = true;
+      this.#standingOn = holder.id;
+      this.#lastFallHeight = 0;
+      this.#log.debug(`Put down on ${holder.id}`);
+      this.#render();
+      this.#syncAnimation();
+      return Promise.resolve(true);
+    }
     this.#vx = vx;
     this.#vy = vy;
     if (Math.abs(vx) > 150) this.#animator.face(vx > 0 ? 'right' : 'left');
@@ -421,6 +443,11 @@ export class MovementController {
 
   #isAbove(surface) {
     return surface !== null && this.#x >= surface.left && this.#x <= surface.right;
+  }
+
+  // A surface whose area (top .. top + depth) the pet's feet are inside.
+  #surfaceHolding() {
+    return this.#surfaces.find((s) => this.#isAbove(s) && this.#y >= s.top && this.#y <= s.top + s.depth) ?? null;
   }
 
   // The first surface the feet passed through while moving down this frame.

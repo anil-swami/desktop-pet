@@ -1,0 +1,275 @@
+/* Settings window. Follows the Windows light/dark theme. */
+
+:root {
+  --bg: #f7f5f1;
+  --card: #ffffff;
+  --text: #2a2521;
+  --muted: #6d655d;
+  --line: #e6e0d8;
+  --accent: #e8822c;       /* Pip orange, a touch deeper for contrast */
+  --accent-text: #ffffff;
+  --track: #d9d2c9;
+  --focus: #1f6fd1;
+  --radius: 12px;
+  color-scheme: light;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #1c1d21;
+    --card: #26272c;
+    --text: #efece8;
+    --muted: #a8a29b;
+    --line: #36373d;
+    --accent: #f29a4a;
+    --accent-text: #1c1d21;
+    --track: #45464d;
+    --focus: #7ab2ff;
+    color-scheme: dark;
+  }
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font: 14px/1.4 "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
+}
+
+body {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+}
+
+/* --- Header --------------------------------------------------------------- */
+
+.top {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 18px 20px 8px;
+}
+
+.top__pet {
+  width: 52px;
+  height: 52px;
+  flex: none;
+}
+
+.top__title {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 650;
+}
+
+.top__subtitle {
+  margin: 2px 0 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+/* --- Sections and rows ------------------------------------------------------ */
+
+.sections {
+  flex: 1;
+  padding: 8px 20px 12px;
+}
+
+.section {
+  margin: 14px 0 0;
+}
+
+.section__title {
+  margin: 0 0 6px 4px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 650;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.card {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--card);
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  min-height: 52px;
+  padding: 10px 14px;
+}
+
+.row + .row {
+  border-top: 1px solid var(--line);
+}
+
+.row__text {
+  min-width: 0;
+}
+
+.row__label {
+  display: block;
+  font-weight: 600;
+}
+
+.row__hint {
+  display: block;
+  margin-top: 1px;
+  color: var(--muted);
+  font-size: 12.5px;
+}
+
+.row__control {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: none;
+}
+
+/* --- Switch (a checkbox with role="switch") --------------------------------- */
+
+.switch {
+  appearance: none;
+  position: relative;
+  width: 42px;
+  height: 24px;
+  margin: 0;
+  border-radius: 999px;
+  background: var(--track);
+  cursor: pointer;
+  transition: background 150ms;
+}
+
+.switch::after {
+  content: "";
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 2px rgb(0 0 0 / 30%);
+  transition: transform 150ms;
+}
+
+.switch:checked {
+  background: var(--accent);
+}
+
+.switch:checked::after {
+  transform: translateX(18px);
+}
+
+/* --- Segmented choice (radio buttons) ---------------------------------------- */
+
+.segmented {
+  display: inline-flex;
+  margin: 0;
+  padding: 2px;
+  border: 0;
+  border-radius: 9px;
+  background: var(--track);
+}
+
+.segmented input {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.segmented label {
+  padding: 5px 11px;
+  border-radius: 7px;
+  font-size: 13px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.segmented input:checked + label {
+  background: var(--card);
+  box-shadow: 0 1px 3px rgb(0 0 0 / 18%);
+  font-weight: 600;
+}
+
+.segmented input:focus-visible + label {
+  outline: 2px solid var(--focus);
+  outline-offset: 1px;
+}
+
+/* --- Select, slider, button ------------------------------------------------------ */
+
+.select {
+  min-width: 140px;
+  padding: 6px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--card);
+  color: var(--text);
+  font: inherit;
+}
+
+.slider {
+  width: 140px;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
+.slider__value {
+  min-width: 64px;
+  color: var(--muted);
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.button {
+  padding: 7px 14px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--card);
+  color: var(--text);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.button:hover {
+  border-color: var(--accent);
+}
+
+:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
+/* --- Footer -------------------------------------------------------------------- */
+
+.bottom {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 20px 18px;
+}
+
+.bottom__status {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.bottom__status.is-error {
+  color: #d13c3c;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .switch, .switch::after { transition: none; }
+}

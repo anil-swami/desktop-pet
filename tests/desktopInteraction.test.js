@@ -143,6 +143,58 @@ describe('DesktopInteraction', () => {
     assert.equal(context.character.standingOn, SECOND.id);
   });
 
+  test('carried and let go above an icon: it lands there and sits', async () => {
+    const context = setup();
+    const { character, desktop, ticker } = context;
+    character.grab();
+    await desktop.offerLandingSpots();
+    character.dragTo(245, 150); // above the folder's centre
+    const landed = character.release();
+    await drive(landed, ticker);
+    assert.equal(character.standingOn, FOLDER.id);
+    assert.equal(desktop.settleAfterDrop(), true);
+    assert.equal(desktop.visiting.id, FOLDER.id);
+    assert.equal(character.animation, 'sit');
+  });
+
+  test('put down right on an icon: it hops up on top and sits', async () => {
+    const context = setup();
+    const { character, desktop } = context;
+    character.grab();
+    await desktop.offerLandingSpots();
+    character.dragTo(245, 360); // feet in the middle of the icon
+    assert.equal(await character.release(), true);
+    assert.equal(desktop.settleAfterDrop(), true);
+    assert.equal(character.position.y, FOLDER.y);
+  });
+
+  test('covered icons are not landing spots', async () => {
+    const context = setup();
+    const { character, desktop, ticker } = context;
+    character.grab();
+    await desktop.offerLandingSpots();
+    character.dragTo(645, 150); // above the covered icon
+    await drive(character.release(), ticker);
+    assert.equal(character.standingOn, null);
+    assert.equal(desktop.settleAfterDrop(), false);
+    assert.equal(character.position.y, 600);
+  });
+
+  test('dropped on the floor: the landing spots are cleared again', async () => {
+    const context = setup();
+    const { character, desktop, ticker } = context;
+    character.grab();
+    await desktop.offerLandingSpots();
+    character.dragTo(900, 300);
+    await drive(character.release(), ticker);
+    assert.equal(desktop.settleAfterDrop(), false);
+    // With the spots gone, dropping above the folder now falls to the floor.
+    character.grab();
+    character.dragTo(245, 150);
+    await drive(character.release(), ticker);
+    assert.equal(character.standingOn, null);
+  });
+
   test('cancel() during the walk abandons the visit', async () => {
     const { character, desktop, ticker } = setup();
     const visiting = desktop.visit(FOLDER.id);

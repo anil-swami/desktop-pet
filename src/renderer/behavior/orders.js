@@ -64,7 +64,7 @@ export const ORDERS = Object.freeze({
     },
   },
 
-  // Sit and stay (up to 3 minutes, or until something else happens).
+  // Sit and stay for a little while (20 s, or until something else happens).
   sit: {
     name: 'order-sit',
     state: 'SITTING',
@@ -72,7 +72,7 @@ export const ORDERS = Object.freeze({
     speech: { topic: 'sitOk', priority: 'reply' },
     async run({ character, wait }) {
       character.play('sit');
-      if (await wait(3 * 60_000)) character.play('idle');
+      if (await wait(20_000)) character.play('idle');
     },
   },
 

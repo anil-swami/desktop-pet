@@ -46,11 +46,53 @@ const dialogue = new DialogueManager({ view: bubbles, ticker, random, log: creat
 const quiet = { fullscreen: false, away: false };
 const updateQuiet = () => dialogue.setQuiet(quiet.fullscreen || quiet.away);
 
-// The menu shows current settings and what the pet is doing, so send them along.
+// The menu shows what the pet is doing (settings toggles come from the main process).
 pet.addEventListener('contextmenu', (event) => {
   event.preventDefault();
-  api?.showContextMenu({ mouseMode: mouse?.mode, behavior: behavior?.describe(), speech: dialogue.enabled });
+  api?.showContextMenu({ mouseMode: mouse?.mode, behavior: behavior?.describe() });
 });
+
+// --- Settings ------------------------------------------------------------------------
+// Values come from the main process (src/config/settingsSchema.js lists them all).
+
+const PACE = { calm: 1.6, normal: 1, lively: 0.6 };
+const CHATTINESS = { quiet: 0.4, normal: 1, chatty: 1.8 };
+const systemReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
+let settings = {};
+
+function updateMotionClasses() {
+  const reduce = settings.reducedMotion === 'on' || (settings.reducedMotion !== 'off' && systemReducedMotion.matches);
+  document.body.classList.toggle('reduce-motion', reduce);
+  document.body.classList.toggle('is-resting', quiet.away && settings.restWhenAway !== false);
+}
+systemReducedMotion.addEventListener('change', updateMotionClasses);
+
+function applySettings(next) {
+  settings = next ?? {};
+  dialogue.setEnabled(settings.speech !== false);
+  dialogue.setChattiness(CHATTINESS[settings.chattiness] ?? 1);
+  clickThrough.setGhost(settings.ghostMode === true);
+  ticker.setFrameInterval(settings.quality === 'saver' ? 33 : 0);
+  document.documentElement.style.setProperty('--motion-speed', String(settings.animationSpeed ?? 1));
+  updateMotionClasses();
+
+  if (!character) return; // the rest needs the pet (applied again once it exists)
+  character.setMovementOptions({ walkSpeed: settings.walkSpeed, runSpeed: settings.runSpeed });
+  character.setAnimationSpeed(settings.animationSpeed ?? 1);
+  behavior?.setEnabled(settings.autonomous !== false);
+  behavior?.setPace(PACE[settings.activityLevel] ?? 1);
+  if (mouse) {
+    if (settings.mouseReactions === false) mouse.setMode('off');
+    else if (mouse.mode === 'off') mouse.setMode('curious');
+  }
+}
+
+// The character drawn bigger or smaller (settings: Size). The main process
+// reloads this page when the size changes, so this runs once at start.
+function scaleCharacter(data, scale = 1) {
+  if (!scale || scale === 1) return data;
+  return { ...data, width: Math.round(data.width * scale), height: Math.round(data.height * scale) };
+}
 
 // The pet window covers the work area, so its size is the space the pet can use.
 const currentArea = () => ({ width: window.innerWidth, height: window.innerHeight });
@@ -80,6 +122,7 @@ const MOUSE_EFFECTS = {
   woken:          { mood: -3, say: 'woken' },
   pet:            { order: ORDERS.pet },
   grab:           { pause: 6000, say: 'grab' },
+  landed:         { pause: 5000 }, // a moment to sit where it was put down
   'dropped-hard': { mood: -5, say: 'dizzy' },
   startle:        { pause: 3000, say: 'startle', priority: 'event' },
   flee:           { pause: 4000, say: 'flee', priority: 'event' },
@@ -87,6 +130,10 @@ const MOUSE_EFFECTS = {
 };
 
 function onMouseInteraction(kind) {
+  // Carried: icons become landing spots. Landed: on an icon? Sit there.
+  if (kind === 'grab') desktop?.offerLandingSpots();
+  if (kind === 'landed') desktop?.settleAfterDrop();
+
   const effect = MOUSE_EFFECTS[kind];
   if (!effect) return;
   const { pause, say, order, priority = 'reply', chance, ...changes } = effect;
@@ -129,6 +176,9 @@ const ORDER_COMMANDS = {
   feed: ORDERS.feed,
 };
 
+// When following stops: back to noticing the cursor, unless mouse reactions are off.
+const restingMouseMode = () => (settings.mouseReactions === false ? 'off' : 'curious');
+
 // A direct movement order (developer menu) overrides "follow the mouse" and any icon visit.
 const MOVEMENT_COMMANDS = new Set(['walk', 'run', 'move-to', 'movement-demo', 'drop', 'visit-icon']);
 // Anything you ask for by hand pauses the pet's own ideas for a while.
@@ -148,21 +198,18 @@ function handleCommand(command) {
   if (command.type === 'user-away') {
     quiet.away = command.away === true;
     updateQuiet(); // before the behavior reacts, so "Welcome back!" can show
-    behavior?.setUserAway(quiet.away);
+    updateMotionClasses();
+    behavior?.setUserAway(quiet.away && settings.restWhenAway !== false);
     return;
   }
-  if (command.type === 'autonomy') {
-    behavior?.setEnabled(command.enabled === true);
-    return;
-  }
-  if (command.type === 'speech') {
-    dialogue.setEnabled(command.enabled === true);
+  if (command.type === 'settings') {
+    applySettings(command.settings);
     return;
   }
   // Orders from the pet menu.
   if (Object.hasOwn(ORDER_COMMANDS, command.type)) {
     stopDemos();
-    if (mouse?.mode === 'follow') mouse.setMode('curious'); // any order ends following
+    if (mouse?.mode === 'follow') mouse.setMode(restingMouseMode()); // any order ends following
     behavior?.order(ORDER_COMMANDS[command.type]);
     return;
   }
@@ -170,7 +217,7 @@ function handleCommand(command) {
     stopDemos();
     const follow = command.enabled === true;
     if (follow && character.standingOn !== null) desktop?.leave();
-    mouse?.setMode(follow ? 'follow' : 'curious');
+    mouse?.setMode(follow ? 'follow' : restingMouseMode());
     if (follow) dialogue.topic('comeHere', { priority: 'reply' });
     return;
   }
@@ -186,7 +233,7 @@ function handleCommand(command) {
 
   stopDemos();
   if (command.type !== 'mouse-mode') behavior?.interrupt(`command: ${command.type}`, MANUAL_PAUSE_MS);
-  if (mouse?.mode === 'follow' && MOVEMENT_COMMANDS.has(command.type)) mouse.setMode('curious');
+  if (mouse?.mode === 'follow' && MOVEMENT_COMMANDS.has(command.type)) mouse.setMode(restingMouseMode());
   if (MOVEMENT_COMMANDS.has(command.type) && command.type !== 'visit-icon') desktop?.cancel();
 
   switch (command.type) {
@@ -255,6 +302,12 @@ async function start() {
     return;
   }
 
+  try {
+    applySettings(await api.getSettings());
+  } catch (err) {
+    log.warn(`Could not load settings, using defaults: ${err.message}`);
+  }
+
   let data = null;
   try {
     data = await api.getCharacter();
@@ -266,6 +319,7 @@ async function start() {
     showFallback();
     return;
   }
+  data = scaleCharacter(data, settings.scale);
 
   view.configure(data);
   const failed = await view.preload(uniqueFrameUrls(data));
@@ -314,6 +368,7 @@ async function start() {
     tools: { treats, effects, pointer: () => mouse.pointer },
     extraContext: () => ({ treats: treats.count }),
   });
+  applySettings(settings); // now the pet exists: speeds, autonomy, mouse reactions...
 
   api.onCommand(handleCommand);
   // Catch up on what happened while we were loading (the app in front, user away?).

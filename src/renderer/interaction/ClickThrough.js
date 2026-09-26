@@ -12,6 +12,9 @@
 //
 // hold() keeps the window accepting the mouse regardless of hover, e.g. while
 // the pet is being dragged and the cursor races ahead of it.
+//
+// Ghost mode (a setting): clicks pass through the pet too, unless Ctrl is held,
+// so there's always a way back to the pet's menu.
 
 export class ClickThrough {
   #target;
@@ -21,6 +24,8 @@ export class ClickThrough {
   #holds = 0;
   #interactive = false;
   #pointer = null;
+  #ctrl = false;
+  #ghost = false;
   #stopWatching = null;
 
   constructor({ target, api, ticker }) {
@@ -30,13 +35,19 @@ export class ClickThrough {
 
     document.addEventListener('mousemove', (event) => {
       this.#pointer = { x: event.clientX, y: event.clientY };
-      this.#setOver(target.contains(event.target));
+      this.#ctrl = event.ctrlKey;
+      this.#setOver(this.#reachable(target.contains(event.target)));
     });
     document.addEventListener('mouseleave', () => {
       this.#pointer = null;
       this.#setOver(false);
     });
     window.addEventListener('blur', () => this.#setOver(false));
+  }
+
+  setGhost(ghost) {
+    this.#ghost = ghost === true;
+    if (this.#ghost) this.#recheck();
   }
 
   // Returns a release function (safe to call more than once).
@@ -72,9 +83,14 @@ export class ClickThrough {
     this.#api?.setClickThrough(!interactive);
   }
 
+  // Over the pet, and (in ghost mode) holding Ctrl.
+  #reachable(overPet) {
+    return overPet && (!this.#ghost || this.#ctrl);
+  }
+
   #recheck = () => {
     if (!this.#pointer) return;
     const element = document.elementFromPoint(this.#pointer.x, this.#pointer.y);
-    this.#setOver(this.#target.contains(element));
+    this.#setOver(this.#reachable(this.#target.contains(element)));
   };
 }

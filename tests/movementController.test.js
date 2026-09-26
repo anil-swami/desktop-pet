@@ -342,6 +342,25 @@ describe('MovementController', () => {
     assert.ok(Math.abs(movement.position.x - 600) < 1);
   });
 
+  test('gently put down overlapping a platform, the pet sets on top of it', async () => {
+    const { movement } = setup();
+    movement.setSurfaces([{ id: 'icon', left: 450, right: 550, top: 300, depth: 100 }]);
+    movement.grab();
+    movement.dragTo(500, 350); // feet halfway down the icon
+    assert.equal(await movement.release(), true);
+    assert.equal(movement.standingOn, 'icon');
+    assert.equal(movement.position.y, 300);
+  });
+
+  test('a hard throw over a platform still flies', () => {
+    const { movement } = setup();
+    movement.setSurfaces([{ id: 'icon', left: 450, right: 550, top: 300, depth: 100 }]);
+    movement.grab();
+    movement.dragTo(500, 350);
+    movement.release({ vx: 900, vy: -400 });
+    assert.equal(movement.grounded, false);
+  });
+
   test('whenLanded resolves immediately on the ground, or on landing', async () => {
     const { movement, ticker } = setup();
     assert.equal(await movement.whenLanded(), true);

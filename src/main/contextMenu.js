@@ -30,8 +30,10 @@ export const MOUSE_MODE_ITEMS = Object.freeze([
 
 const MAX_ICONS_IN_MENU = 15;
 
+// settings: current values (SettingsStore); setSetting(key, value) changes one.
 export function buildPetMenu({
-  character, isDev, mouseMode, speech, behavior, appAwareness, desktopIcons, sendCommand, setNoticeApps, openDevTools,
+  character, isDev, mouseMode, settings, behavior, appsAvailable, desktopIcons,
+  sendCommand, setSetting, openSettings, openDevTools,
 }) {
   const name = character?.name ?? 'Desktop Pet';
   const doing = behavior?.state ? ` · ${behavior.state.toLowerCase().replaceAll('_', ' ')}` : '';
@@ -60,26 +62,27 @@ export function buildPetMenu({
     command(`Pet ${menuText(name)}`, { type: 'pet' }),
     command(`Feed ${menuText(name)}`, { type: 'feed' }),
     { type: 'separator' },
+    // Quick toggles for the most used settings (saved like any other setting).
     {
       label: 'Live on its own',
       type: 'checkbox',
-      checked: behavior?.enabled ?? true,
-      click: () => sendCommand({ type: 'autonomy', enabled: !(behavior?.enabled ?? true) }),
+      checked: settings.autonomous,
+      click: () => setSetting('autonomous', !settings.autonomous),
     },
     {
       label: 'Speech bubbles',
       type: 'checkbox',
-      checked: speech,
-      click: () => sendCommand({ type: 'speech', enabled: !speech }),
+      checked: settings.speech,
+      click: () => setSetting('speech', !settings.speech),
     },
     {
-      label: appAwareness.available ? 'Notice which app I use' : 'Notice which app I use (unavailable)',
+      label: appsAvailable ? 'Notice which app I use' : 'Notice which app I use (unavailable)',
       type: 'checkbox',
-      checked: appAwareness.enabled && appAwareness.available,
-      enabled: appAwareness.available,
-      click: () => setNoticeApps(!appAwareness.enabled),
+      checked: settings.noticeApps && appsAvailable,
+      enabled: appsAvailable,
+      click: () => setSetting('noticeApps', !settings.noticeApps),
     },
-    { label: 'Settings... (coming soon)', enabled: false },
+    { label: 'Settings...', click: openSettings },
     { type: 'separator' },
   );
   if (isDev) {

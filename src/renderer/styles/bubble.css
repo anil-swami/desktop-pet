@@ -114,14 +114,12 @@
   bottom: calc(100% + 16px);
 }
 
-@media (prefers-reduced-motion: reduce) {
-  .bubble,
-  .bubble.is-visible {
-    transform: translateX(calc(-50% + var(--bubble-shift)));
-    transition: opacity 120ms linear, visibility 0s linear 120ms;
-  }
+.reduce-motion .bubble,
+.reduce-motion .bubble.is-visible {
+  transform: translateX(calc(-50% + var(--bubble-shift)));
+  transition: opacity 120ms linear, visibility 0s linear 120ms;
+}
 
-  .bubble.is-visible {
-    transition: opacity 120ms linear, visibility 0s;
-  }
+.reduce-motion .bubble.is-visible {
+  transition: opacity 120ms linear, visibility 0s;
 }

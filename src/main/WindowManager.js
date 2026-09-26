@@ -28,7 +28,7 @@ export class WindowManager {
   }
 
   // bounds: the work area to cover, in DIPs.
-  createPetWindow({ bounds, devTools = false }) {
+  createPetWindow({ bounds, devTools = false, alwaysOnTop = true }) {
     const { x, y, width, height } = bounds;
     log.info(`Creating pet window: ${rectText(bounds)}`);
 
@@ -45,7 +45,7 @@ export class WindowManager {
       maximizable: false,
       fullscreenable: false,
       skipTaskbar: true,            // a pet, not an app: no taskbar button
-      alwaysOnTop: true,
+      alwaysOnTop,                  // a setting (on by default)
       focusable: false,             // clicking the pet never steals focus from your active app
       webPreferences: {
         preload: path.join(appRoot, 'preload.cjs'),
@@ -123,6 +123,21 @@ export class WindowManager {
     this.#clickThrough = enabled;
     win.setIgnoreMouseEvents(enabled, { forward: true });
     log.debug(`Click-through ${enabled ? 'ON' : 'OFF'}`);
+  }
+
+  setAlwaysOnTop(onTop) {
+    this.petWindow?.setAlwaysOnTop(onTop);
+    log.info(`Always on top: ${onTop ? 'on' : 'off'}`);
+  }
+
+  // Start the pet page over (e.g. after changing its size or character).
+  reloadPet() {
+    const win = this.petWindow;
+    if (!win) return;
+    this.#clickThrough = null;
+    this.setClickThrough(true); // never leave the invisible window catching clicks
+    win.webContents.reload();
+    log.info('Pet page reloaded');
   }
 
   // Only works when the window was created with devTools enabled (npm run dev).

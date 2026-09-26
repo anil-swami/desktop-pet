@@ -2,7 +2,7 @@
 
 A tiny cartoon creature that lives on your Windows desktop. Built with Electron and vanilla JavaScript.
 
-> **Status:** Phases 1–11 — Pip lives on its own: it wanders, dashes, hops, sits and naps, and hops between desktop icons whenever your desktop is visible. It notices which app you're using, talks in speech and thought bubbles, and you can pet it, feed it, throw it, and tell it to come, sit, sleep or stop.
+> **Status:** Phases 1–12 — Pip lives on its own: it wanders, dashes, hops, sits and naps, and hops between desktop icons whenever your desktop is visible. It notices which app you're using, talks in speech and thought bubbles, and you can pet it, feed it, throw it (onto icons too), and tell it to come, sit, sleep or stop. A settings window saves your preferences.
 
 ## Requirements
 
@@ -22,6 +22,7 @@ npm start          # run the pet
 npm run dev        # debug logging + developer items in the right-click menu
 npm test           # unit tests (Node's built-in test runner, no extra dependencies)
 npm run build:helper   # force a rebuild of the Windows helper (normally automatic)
+npm run dev -- --open-settings   # also open the settings window at start
 ```
 
 `npm start` and `npm run dev` first compile the small Windows helper (`build/windows-helper.exe`) if its source changed. See [Windows helper](#windows-helper).
@@ -47,6 +48,7 @@ $env:PET_LOG_LEVEL = "debug"; npm start
 | Rub the cursor back and forth over it (no clicking) | **petting**: hearts, "Purr..." |
 | Click while it sleeps | wakes up ("Five more minutes...") |
 | Drag and let go / flick | falls, or flies and bounces off the screen edge |
+| Drag it onto a desktop icon and let go | sits on the icon |
 | Move the cursor near it | looks at you |
 
 **The pet menu** (right-click Pip):
@@ -54,7 +56,7 @@ $env:PET_LOG_LEVEL = "debug"; npm start
 | Item | What happens |
 |---|---|
 | Come here | Pip follows your cursor for a moment: move the mouse where you want it, and it stops once the cursor settles |
-| Sit | sits and stays (up to 3 minutes) |
+| Sit | sits and stays for about 20 seconds |
 | Follow mouse | keeps following the cursor until unticked |
 | Sleep / Wake up | naps until woken (or 5 minutes) / wakes up |
 | Run! | zoomies: races to one side of the screen and back |
@@ -64,7 +66,7 @@ $env:PET_LOG_LEVEL = "debug"; npm start
 | Live on its own | autonomy on/off; menu orders still work when it's off |
 | Speech bubbles | bubbles on/off |
 | Notice which app I use | app awareness on/off |
-| Settings... | Phase 12 |
+| Settings... | opens the [settings window](#settings) |
 
 Any order is cut short by the next order, a click or a drag.
 
@@ -77,9 +79,11 @@ Not yet. Packaging into a Windows installer is added in a later phase. For now, 
 ```text
 desktop-pet/
 ├── main.js                  Entry point: app lifecycle (main process)
-├── preload.cjs              The only bridge between the page and the main process
+├── preload.cjs              The only bridge between the pet page and the main process
+├── settings-preload.cjs     The same, for the settings window
 ├── scripts/build-helper.mjs Compiles the Windows helper with the C# compiler built into Windows
 ├── src/
+│   ├── config/settingsSchema.js  Every setting: type, default, limits, label (shared)
 │   ├── main/                Main process (Node.js): windows, OS, IPC
 │   │   ├── WindowManager.js     Creates the transparent overlay window, click-through
 │   │   ├── DisplayManager.js    Watches the screen; reports work-area changes
@@ -88,11 +92,14 @@ desktop-pet/
 │   │   ├── DesktopIcons.js      Desktop icon scans → window coordinates (no file paths)
 │   │   ├── AppAwareness.js      Which app is in front → category (code, browser...)
 │   │   ├── UserPresence.js      Is the user at the computer?
+│   │   ├── SettingsStore.js     Loads, validates, saves (debounced, atomic) and announces settings
+│   │   ├── SettingsWindow.js    The settings window
 │   │   ├── CharacterLoader.js   Reads + validates character.json, fills in fallbacks
 │   │   ├── contextMenu.js       Native right-click menu
 │   │   ├── ipcHandlers.js       Validates and handles messages from the page
 │   │   └── logger.js            Leveled [Pet:scope] logging
-│   └── renderer/            Renderer process (Chromium page, no Node.js)
+│   ├── settings/            The settings window page (index.html, settings.js, settings.css)
+│   └── renderer/            Renderer process: the pet page (Chromium, no Node.js)
 │       ├── renderer.js          Entry point: builds the pet, wires everything, commands
 │       ├── core/
 │       │   ├── Ticker.js            The single animation loop + timer registry
@@ -247,6 +254,8 @@ Pip decides what to do by itself. There's no giant if/else: each **activity** sa
 
 **The scheduler** (`BehaviorScheduler.js`) drops activities still on **cooldown** and keeps only the highest **priority** tier. It then picks by **weight**: an activity with weight 4 is twice as likely as one with weight 2. All randomness goes through one `Random` object, so tests can use a seed and get the same choices every run.
 
+**Pace:** the Activity setting stretches (calm, ×1.6) or squeezes (lively, ×0.6) every pause inside Pip's own activities: sitting (3–7 s), looking around, sitting on an icon (2.5–6 s), and the gaps between activities. Orders keep their own timing.
+
 **Orders** (`orders.js`) are what you ask for: come, sit, sleep, run, stop, pet, feed. They're written like activities, but `BehaviorManager.order()` runs them straight away. They skip any pause, run even when autonomy is off, and set their own pause afterwards (`holdMs`, e.g. 30 s after Stop). A treat left on the floor is picked up later by the `eat-leftovers` activity.
 
 **Interruptions:** a click, a drag or a menu command calls `interrupt(reason, pause)`. The running activity's `wait()` resolves `false` and its walk stops, so the activity simply returns. The loop then rests for a few seconds (20 s after a menu command) before choosing again.
@@ -258,6 +267,44 @@ Pip decides what to do by itself. There's no giant if/else: each **activity** sa
 - **You're away** (no input for 5 minutes, or the screen is locked): Pip naps and wakes up happy when you're back.
 
 The logs show every decision: `State: IDLE → WALKING (wander)`.
+
+### Settings
+
+Right-click Pip → **Settings...** opens a small window. Changes apply immediately; there's no Save button.
+
+| Section | Settings |
+|---|---|
+| Behavior | Live on its own · Activity (calm / normal / lively) · Walking speed · Running speed · React to the mouse · Speech bubbles · Chattiness · Notice which app I use |
+| Appearance | Character · Size · Animation speed |
+| Desktop | Always on top · Let clicks pass through the pet (hold **Ctrl** to reach it again) |
+| Performance | Reduce motion (like Windows / on / off) · Animation quality (smooth / battery saver = 30 fps) · Rest when I'm away |
+
+The three quick toggles in the pet menu are the same settings.
+
+**How it's built:**
+
+```text
+settingsSchema.js ── one list: type, default, min/max/step, choices, label, hint
+      │                            │
+      ▼                            ▼
+SettingsStore (main)         settings window builds its controls from the schema
+  load: validate, repair       (switch / segmented buttons / slider / select)
+  set:  validate → save → notify ──▶ main applies: always on top, notice apps,
+                                     size/character (reloads the pet page)
+                               ──▶ pet page applies the rest: speeds, pace,
+                                     chattiness, ghost mode, motion, frame rate
+```
+
+- **Where:** `%APPDATA%\desktop-pet\settings.json` (never in the repo).
+- **Robust:**
+  - Every value is validated: numbers are clamped and snapped to their step, choices must exist, and unknown keys are dropped.
+  - A damaged file is kept as `settings.json.corrupt-<time>`, and defaults are used.
+  - Saving is debounced and atomic (write to a temp file, then rename).
+- **Secure:** the settings window is sandboxed like the pet page. Its IPC handlers accept only that window, and the schema checks every value.
+
+**Adding a setting:**
+1. Add an entry to `SETTINGS` in [`settingsSchema.js`](src/config/settingsSchema.js). The window shows it automatically.
+2. Apply it: in `applySettings()` in `renderer.js` for the pet page, or in `onSettingsChanged()` in `main.js` for main-process settings.
 
 ### Speech bubbles
 
@@ -350,6 +397,7 @@ Pip can walk to a desktop icon, leap on top of it and sit there, and leap from i
 ```text
 scan ─▶ pick a free icon ─▶ walk to a take-off spot beside it ─▶ leap (jumpTo) ─▶ sit
       ─▶ on an icon already? leap straight across to the next one
+picked up ─▶ every free icon becomes a landing spot ─▶ let go above or on one ─▶ sits there
       ─▶ every second: still on it?   every 5 s: rescan — moved, covered or hidden? ─▶ hop down
       ─▶ icon deleted? the platform vanishes and Pip falls
 ```
@@ -486,9 +534,10 @@ Invalid frames (missing file, wrong type, or a path outside the folder) are skip
 ## Security
 
 - `contextIsolation: true`, `nodeIntegration: false`, `sandbox: true`: the page has no Node.js access.
-- The preload exposes six functions on `window.desktopPet`, and copies only known fields from anything the page sends.
+- The pet preload exposes eight functions on `window.desktopPet`, and the settings preload four on `window.petSettings`. Both copy only known fields from anything their page sends.
 - Every IPC handler checks the sender is the pet window and validates argument types.
-- A Content-Security-Policy restricts the page to bundled files. Navigation and popups are blocked.
+- A Content-Security-Policy restricts both pages to bundled files. Navigation and popups are blocked.
+- Settings changes go through `settings:set`, which only the settings window may call, and every value is checked against the schema.
 - Character files are read by the main process only. Frame paths cannot leave their character folder.
 - The Windows helper is built locally from the source in this repo, receives only fixed command names, and never gets input from the page.
 
@@ -501,6 +550,7 @@ Invalid frames (missing file, wrong type, or a path outside the folder) are skip
 | Desktop icons | Icon names, kinds and positions; rectangles of windows covering them | File contents, file paths (hashed in the helper), window titles or contents |
 | App awareness (can be switched off) | The foreground app's **process file name** (e.g. `Code.exe`); desktop / folder window / app; maximized or fullscreen | Window titles, document names, URLs, anything inside apps |
 | Away detection | Seconds since the last input anywhere (one number); screen lock and sleep events | Which keys or buttons were used |
+| Settings | Your choices, saved in `%APPDATA%\desktop-pet\settings.json` | — |
 
 Everything stays on your PC and in memory: nothing is logged in bulk, stored or sent anywhere.
 
@@ -516,7 +566,8 @@ Everything stays on your PC and in memory: nothing is logged in bulk, stored or 
 - **Icons in the top row** are skipped: Pip would stick out above the screen.
 - **"Show desktop icons" turned off** (right-click the desktop → View) means there's nothing to visit.
 - **Apps running as administrator** may be reported without a name, and are then treated as "other".
-- **Fullscreen apps**: the pet is always on top, so it still shows over fullscreen videos and games, but it calms down. Hiding it completely is a Phase 12 setting.
+- **Fullscreen apps**: with **Always on top** on, the pet shows over fullscreen videos and games, but calms down and stays quiet. Turn Always on top off if you'd rather apps cover it.
+- **Ghost mode stuck?** With "Let clicks pass through the pet" on, hold **Ctrl** and move the mouse over the pet to reach its menu again.
 
 ## Roadmap
 
@@ -531,7 +582,7 @@ Everything stays on your PC and in memory: nothing is logged in bulk, stored or 
 9. ✅ Autonomous behavior (8 and 9 were brought forward together with 7)
 10. ✅ Speech bubbles
 11. ✅ Character interaction and pet menu
-12. Settings
+12. ✅ Settings
 13. System tray
 14. Start with Windows
 15. Performance pass

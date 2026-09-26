@@ -58,6 +58,7 @@ export class BehaviorManager {
 
   #running = false;
   #enabled = true;
+  #pace = 1;            // >1 = calmer (longer pauses), <1 = livelier (settings: Activity)
   #token = 0;
   #pausedUntil = 0;
   #waits = new Set();
@@ -145,6 +146,12 @@ export class BehaviorManager {
     this.#token += 1;
     this.#cancelWaits();
     this.#wakeLoop?.();
+  }
+
+  // Stretch (e.g. 1.6 = calm) or squeeze (e.g. 0.6 = lively) the pauses in the
+  // pet's own activities. Orders keep their timing.
+  setPace(pace) {
+    this.#pace = Math.min(3, Math.max(0.3, Number(pace) || 1));
   }
 
   setEnabled(enabled) {
@@ -241,7 +248,7 @@ export class BehaviorManager {
         }
         const order = this.#orders.shift();
         const token = this.#token;
-        await this.#perform(order, token, null);
+        await this.#perform(order, token, null, { paced: false });
         if (token === this.#token && order.holdMs) this.#pausedUntil = Math.max(this.#pausedUntil, this.#now() + order.holdMs);
         continue;
       }
@@ -273,11 +280,12 @@ export class BehaviorManager {
         continue;
       }
       await this.#perform(activity, token, context);
-      if (token === this.#token) await this.#rest(this.#random.between(300, 1200));
+      if (token === this.#token) await this.#rest(this.#random.between(200, 700) * this.#pace);
     }
   }
 
-  async #perform(activity, token, context) {
+  async #perform(activity, token, context, { paced = true } = {}) {
+    const pace = paced ? this.#pace : 1;
     this.#current = activity;
     this.#setState(activity.state, activity.name);
     if (activity.speech) this.#speak(activity.speech);
@@ -294,7 +302,7 @@ export class BehaviorManager {
         random: this.#random,
         context: context ?? {},
         adjust: (changes) => this.#personality.adjust(changes),
-        wait: (ms) => this.#wait(ms, token),
+        wait: (ms) => this.#wait(ms * pace, token),
         active: () => token === this.#token,
         spot: (min, max) => this.#spot(min, max),
         // Idle chatter by default; the dialogue rules decide if it actually shows.

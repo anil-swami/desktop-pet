@@ -63,6 +63,27 @@ export function loadCharacter(id, { charactersDir = DEFAULT_CHARACTERS_DIR } = {
   return normalizeManifest(raw, { id, dir });
 }
 
+// Characters that can actually be loaded, as [[id, name], ...] (for Settings).
+export function listCharacters({ charactersDir = DEFAULT_CHARACTERS_DIR, fs: fileSystem = fs } = {}) {
+  let entries = [];
+  try {
+    entries = fileSystem.readdirSync(charactersDir, { withFileTypes: true }).filter((entry) => entry.isDirectory());
+  } catch {
+    return [];
+  }
+  const characters = [];
+  for (const entry of entries) {
+    if (!ID_PATTERN.test(entry.name)) continue;
+    try {
+      const { character } = loadCharacter(entry.name, { charactersDir });
+      characters.push([character.id, character.name]);
+    } catch {
+      // Not a usable character pack: leave it out of the list.
+    }
+  }
+  return characters;
+}
+
 // Returns { character, warnings }. Throws CharacterError only when the
 // character is unusable (bad JSON shape or no valid idle animation).
 export function normalizeManifest(raw, { id, dir, fileExists = fs.existsSync }) {

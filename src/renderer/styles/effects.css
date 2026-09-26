@@ -57,9 +57,13 @@
   scale: 0.3;
 }
 
-@media (prefers-reduced-motion: reduce) {
-  .effect--heart { animation: effect-fade 900ms ease-out var(--delay, 0ms) forwards; transform: translate(calc(-50% + var(--dx)), -30px); }
-  .effect--crumb { animation: effect-fade 300ms linear forwards; }
+.reduce-motion .effect--heart {
+  animation: effect-fade 900ms ease-out var(--delay, 0ms) forwards;
+  transform: translate(calc(-50% + var(--dx)), -30px);
+}
+
+.reduce-motion .effect--crumb {
+  animation: effect-fade 300ms linear forwards;
 }
 
 @keyframes effect-fade {

@@ -26,7 +26,16 @@ export const Channels = Object.freeze({
   GET_CHARACTER: 'pet:get-character',
   GET_DESKTOP_ICONS: 'pet:get-desktop-icons',
   GET_CONTEXT: 'pet:get-context',
+  GET_SETTINGS: 'pet:get-settings',
   COMMAND: 'pet:command',
+});
+
+// The settings window's channels. Keep in sync with settings-preload.cjs.
+export const SettingsChannels = Object.freeze({
+  LOAD: 'settings:load',
+  SET: 'settings:set',
+  RESET: 'settings:reset',
+  CHANGED: 'settings:changed',
 });
 
 const STATE_PATTERN = /^[A-Z_]{1,20}$/;
@@ -35,7 +44,6 @@ const STATE_PATTERN = /^[A-Z_]{1,20}$/;
 function behaviorSummary(raw) {
   if (!raw || typeof raw !== 'object') return null;
   return {
-    enabled: raw.enabled === true,
     state: typeof raw.state === 'string' && STATE_PATTERN.test(raw.state) ? raw.state : null,
     activity: typeof raw.activity === 'string' ? raw.activity.replace(/[^a-z-]/g, '').slice(0, 30) : null,
     mood: typeof raw.mood === 'string' ? raw.mood.replace(/[^a-z]/g, '').slice(0, 12) : null,
@@ -43,7 +51,9 @@ function behaviorSummary(raw) {
   };
 }
 
-export function registerIpcHandlers({ windowManager, getCharacter, desktopIcons, appAwareness, userPresence, isDev }) {
+export function registerIpcHandlers({
+  windowManager, settingsWindow, settings, getCharacter, desktopIcons, appAwareness, userPresence, isDev,
+}) {
   const fromPet = (event) => {
     if (windowManager.isPetWebContents(event.sender)) return true;
     log.warn('Ignored IPC from unknown sender');
@@ -67,19 +77,18 @@ export function registerIpcHandlers({ windowManager, getCharacter, desktopIcons,
     const icons = desktopIcons.last;
     if (isDev && (!icons || Date.now() - icons.time > MENU_ICONS_MAX_AGE_MS)) desktopIcons.scan();
 
+    const character = getCharacter();
     const menu = buildPetMenu({
-      character: getCharacter(),
+      character,
       isDev,
       mouseMode,
-      speech: typeof state?.speech === 'boolean' ? state.speech : true,
+      settings: settings.all(),
       behavior: behaviorSummary(state?.behavior),
-      appAwareness: { enabled: appAwareness.enabled, available: appAwareness.available },
+      appsAvailable: appAwareness.available,
       desktopIcons: icons,
       sendCommand,
-      setNoticeApps: (enabled) => {
-        appAwareness.setEnabled(enabled);
-        if (!enabled) sendCommand({ type: 'app-changed', app: null });
-      },
+      setSetting: (key, value) => settings.set(key, value),
+      openSettings: () => settingsWindow.open({ title: `${character?.name ?? 'Pet'} settings` }),
       openDevTools: () => windowManager.openDevTools(),
     });
     menu.popup({ window: windowManager.petWindow });
@@ -100,4 +109,23 @@ export function registerIpcHandlers({ windowManager, getCharacter, desktopIcons,
   ipcMain.handle(Channels.GET_CONTEXT, (event) => (fromPet(event)
     ? { app: appAwareness.current, userAway: userPresence.away }
     : null));
+
+  ipcMain.handle(Channels.GET_SETTINGS, (event) => (fromPet(event) ? settings.all() : null));
+
+  // --- The settings window ---------------------------------------------------------
+  const fromSettings = (event) => {
+    if (settingsWindow.isSettingsContents(event.sender)) return true;
+    log.warn('Ignored settings request from unknown sender');
+    return false;
+  };
+  const denied = { ok: false, error: 'Not allowed' };
+
+  ipcMain.handle(SettingsChannels.LOAD, (event) => (fromSettings(event)
+    ? { schema: settings.schema(), values: settings.all() }
+    : null));
+  ipcMain.handle(SettingsChannels.SET, (event, key, value) => {
+    if (!fromSettings(event) || typeof key !== 'string') return denied;
+    return settings.set(key, value); // the schema validates the value
+  });
+  ipcMain.handle(SettingsChannels.RESET, (event) => (fromSettings(event) ? settings.reset() : denied));
 }

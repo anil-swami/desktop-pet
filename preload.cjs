@@ -18,6 +18,7 @@ const Channels = {
   GET_CHARACTER: 'pet:get-character',
   GET_DESKTOP_ICONS: 'pet:get-desktop-icons',
   GET_CONTEXT: 'pet:get-context',
+  GET_SETTINGS: 'pet:get-settings',
   COMMAND: 'pet:command',
 };
 
@@ -30,9 +31,7 @@ contextBridge.exposeInMainWorld('desktopPet', {
   // Only known fields are copied, as plain values.
   showContextMenu: (state) => ipcRenderer.send(Channels.SHOW_CONTEXT_MENU, {
     mouseMode: text(state?.mouseMode, 20),
-    speech: typeof state?.speech === 'boolean' ? state.speech : null,
     behavior: state?.behavior ? {
-      enabled: state.behavior.enabled === true,
       state: text(state.behavior.state, 20),
       activity: text(state.behavior.activity, 30),
       mood: text(state.behavior.mood, 12),
@@ -49,6 +48,9 @@ contextBridge.exposeInMainWorld('desktopPet', {
 
   // Request/response: the app in front and whether the user is away, right now.
   getContext: () => ipcRenderer.invoke(Channels.GET_CONTEXT),
+
+  // Request/response: the user's settings (later changes arrive as a "settings" command).
+  getSettings: () => ipcRenderer.invoke(Channels.GET_SETTINGS),
 
   // Subscribe to commands pushed by the main process. Returns an unsubscribe
   // function. Only the command object is passed on, never the IPC event

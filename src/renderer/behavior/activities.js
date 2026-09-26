@@ -36,11 +36,11 @@ export const ACTIVITIES = [
     kind: 'rest',
     weight: ({ personality: p }) => 1.5 + (100 - p.boredom) / 60,
     async run({ character, random, wait, say, context }) {
-      if (!(await wait(random.between(2000, 5000)))) return;
+      if (!(await wait(random.between(1200, 3000)))) return;
       if (context.personality?.boredom > 65) say('bored', { chance: 0.5 });
       if (random.chance(0.5)) {
         character.turnAround();
-        await wait(random.between(1200, 3000));
+        await wait(random.between(800, 1800));
       }
     },
   },
@@ -59,7 +59,7 @@ export const ACTIVITIES = [
     state: 'RUNNING',
     kind: 'run',
     needsFloor: true,
-    cooldownMs: 20_000,
+    cooldownMs: 14_000,
     weight: ({ personality: p, calm }) => (calm || p.energy < 45 ? 0 : (p.energy - 45) / 20 + p.boredom / 50),
     async run({ character, spot, say }) {
       say('dash', { chance: 0.3 });
@@ -70,7 +70,7 @@ export const ACTIVITIES = [
     name: 'hop',
     state: 'PLAYING',
     kind: 'play',
-    cooldownMs: 10_000,
+    cooldownMs: 7000,
     weight: ({ personality: p, calm }) => (calm || p.energy < 30 ? 0 : 0.4 + p.mood / 80 + p.boredom / 80),
     async run({ character, random, wait, say }) {
       say('play', { chance: 0.35 });
@@ -85,13 +85,13 @@ export const ACTIVITIES = [
     name: 'sit',
     state: 'SITTING',
     kind: 'sit',
-    cooldownMs: 8000,
+    cooldownMs: 10_000,
     // Likes to sit and keep you company while you code or watch something.
-    weight: ({ personality: p, app }) => 0.6 + (100 - p.energy) / 35 + (app === 'code' || app === 'media' ? 1.5 : 0),
+    weight: ({ personality: p, app }) => 0.4 + (100 - p.energy) / 45 + (app === 'code' || app === 'media' ? 1 : 0),
     async run({ character, random, wait, say }) {
       character.play('sit');
       say('sit', { chance: 0.15 });
-      if (await wait(random.between(6000, 16000))) character.play('idle');
+      if (await wait(random.between(3000, 7000))) character.play('idle');
     },
   },
   {
@@ -103,7 +103,7 @@ export const ACTIVITIES = [
     weight: ({ personality: p, userAway }) => (userAway ? 10 : p.energy < 35 ? (35 - p.energy) / 4 : 0),
     async run({ character, random, wait, think, say, context }) {
       character.play('sleep');
-      const duration = context.userAway ? 10 * 60_000 : random.between(20_000, 50_000);
+      const duration = context.userAway ? 10 * 60_000 : random.between(12_000, 25_000);
       // A "Zzz..." thought now and then while asleep.
       const dream = () => think('sleep', { priority: 'event', cooldownMs: 8000 });
       dream();
@@ -129,7 +129,7 @@ export const ACTIVITIES = [
     },
     async run({ desktop, random, wait }) {
       if (!(await desktop.visit('random'))) return;
-      await wait(random.between(4000, 10000)); // sit on it a while (visit() already sat down)
+      await wait(random.between(2500, 6000)); // sit on it a few seconds (visit() already sat down)
     },
   },
 ];

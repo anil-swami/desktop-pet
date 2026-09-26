@@ -122,6 +122,15 @@ export class Character {
     if (this.#controller.setDirection(direction)) this.#log.debug(`Direction: ${direction}`);
   }
 
+  setAnimationSpeed(speed) {
+    this.#controller.setSpeed(speed);
+  }
+
+  // e.g. { walkSpeed: 80, runSpeed: 220 }
+  setMovementOptions(options) {
+    this.#movement.setOptions(options);
+  }
+
   // --- Movement (see MovementController) --------------------------------------
 
   walk(direction = this.direction) {

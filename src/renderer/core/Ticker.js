@@ -18,6 +18,7 @@ export class Ticker {
   #timers = new Set();
   #frameId = 0;
   #lastTime = 0;
+  #minInterval = 0; // ms between updates; 0 = every frame (settings: Battery saver = 33)
   #requestFrame;
   #cancelFrame;
   #now;
@@ -38,6 +39,12 @@ export class Ticker {
 
   get running() {
     return this.#frameId !== 0;
+  }
+
+  // Update at most every `ms` milliseconds (e.g. 33 ≈ 30 fps to save battery).
+  // Skipped frames aren't lost: the next update gets the whole elapsed time.
+  setFrameInterval(ms) {
+    this.#minInterval = Math.max(0, Number(ms) || 0);
   }
 
   // Subscribe to every frame. Returns an unsubscribe function.
@@ -81,6 +88,10 @@ export class Ticker {
 
   #frame = (time) => {
     this.#frameId = 0; // this frame is consumed; listeners may add/remove freely below
+    if (this.#minInterval > 0 && time - this.#lastTime < this.#minInterval - 2) {
+      if (this.#listeners.size) this.#frameId = this.#requestFrame(this.#frame); // too soon: skip this one
+      return;
+    }
     const dt = Math.min(Math.max(time - this.#lastTime, 0), MAX_DT);
     this.#lastTime = time;
 

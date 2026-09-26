@@ -23,6 +23,7 @@ export class AnimationController {
   #frameIndex = 0;
   #elapsed = 0;
   #direction;
+  #speed = 1; // 2 = frames advance twice as fast (settings: Animation speed)
   #unsubscribe = null;
   #pending = null; // { promise, resolve } for the current play() call
 
@@ -70,6 +71,10 @@ export class AnimationController {
     return promise;
   }
 
+  setSpeed(speed) {
+    this.#speed = Math.min(4, Math.max(0.25, Number(speed) || 1));
+  }
+
   // Returns true if the direction actually changed.
   setDirection(direction) {
     if ((direction !== 'left' && direction !== 'right') || direction === this.#direction) return false;
@@ -83,7 +88,7 @@ export class AnimationController {
     const animation = this.#animation;
     if (!animation) return;
 
-    this.#elapsed += dt;
+    this.#elapsed += dt * this.#speed;
     let changed = false;
 
     while (this.#elapsed >= animation.frames[this.#frameIndex].ms) {

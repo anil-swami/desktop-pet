@@ -406,6 +406,8 @@ export class MouseInteraction {
 
     const landed = await this.#character.release(this.#throwVelocity(time));
     if (!landed || id !== this.#interaction) return;
+    this.#onInteract('landed');
+    if (this.#character.standingOn !== null) return; // put down on an icon: it sits there
 
     const fall = this.#character.lastFallHeight;
     if (fall >= this.#options.bigFall) {
@@ -480,7 +482,7 @@ export class MouseInteraction {
   }
 
   #resume(snapshot) {
-    if (!snapshot || this.#character.isMoving || this.#character.held) return;
+    if (!snapshot || this.#character.isMoving || this.#character.held || this.#character.standingOn !== null) return;
     this.#log.debug(`Resuming: ${snapshot.mode} ${snapshot.direction}`);
     this.#character[snapshot.mode](snapshot.direction);
   }

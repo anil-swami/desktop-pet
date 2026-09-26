@@ -3,6 +3,9 @@
 //   scan icons ─▶ pick a free one ─▶ walk to a take-off spot beside it
 //        ─▶ leap onto it (it becomes a one-way platform) ─▶ sit
 //        (already on an icon? leap straight across to the next one)
+//
+//   carried by the mouse ─▶ every free icon becomes a landing spot
+//        ─▶ let go above or on one ─▶ it sits there (same checks as a visit)
 //        ─▶ keep checking: still on it? still there, same place, not covered?
 //        ─▶ hop down when asked, or when the icon moves or a window covers it
 //           (if the icon is deleted, the platform simply vanishes and the pet falls)
@@ -41,6 +44,7 @@ export class DesktopInteraction {
   #visit = null;       // { icon, token } while sitting on an icon
   #checks = 0;
   #stopChecking = null;
+  #landingSpots = null; // Map id -> icon while the pet is being carried
 
   // onEvent(kind, icon): 'sat' | 'gone' | 'covered' — e.g. for the pet to comment.
   constructor({ character, getIcons, ticker, log = silentLog, random = Math.random, options = {}, onEvent = () => {} }) {
@@ -158,6 +162,37 @@ export class DesktopInteraction {
     return landing;
   }
 
+  // The pet was picked up: make every free icon a place it can be put down.
+  async offerLandingSpots() {
+    const token = this.#abandon(); // it's being carried: whatever visit there was is over
+    this.#landingSpots = null;
+    const scan = await this.#getIcons();
+    if (token !== this.#token || !this.#character.held) return; // already let go
+    const icons = this.visitable(scan);
+    this.#landingSpots = new Map(icons.map((icon) => [icon.id, icon]));
+    this.#character.setSurfaces(icons.map((icon) => this.#surfaceFor(icon)));
+    this.#log.debug(`${icons.length} icon(s) ready to be landed on`);
+  }
+
+  // The pet was let go and has landed. On an icon? Then it sits there.
+  settleAfterDrop() {
+    const icon = this.#landingSpots?.get(this.#character.standingOn) ?? null;
+    this.#landingSpots = null;
+    if (!icon) {
+      if (this.#character.standingOn === null) this.#character.setSurfaces([]);
+      return false;
+    }
+    this.#character.setSurfaces([this.#surfaceFor(icon)]);
+    const token = ++this.#token;
+    this.#visit = { icon, token };
+    this.#checks = 0;
+    this.#character.play('sit');
+    this.#log.info(`Put down on "${icon.name}": sitting there`);
+    this.#onEvent('sat', icon);
+    this.#scheduleCheck(token);
+    return true;
+  }
+
   // Forget any plan and remove the platform (a pet standing on it falls).
   cancel() {
     this.#abandon();
@@ -182,9 +217,10 @@ export class DesktopInteraction {
   }
 
   // Only the middle of the icon holds the pet, so it visibly sits on the picture.
+  // `depth`: letting go with the feet anywhere on the icon still counts.
   #surfaceFor(icon) {
     const inset = icon.width * this.#options.surfaceInset;
-    return { id: icon.id, left: icon.x + inset, right: icon.x + icon.width - inset, top: icon.y };
+    return { id: icon.id, left: icon.x + inset, right: icon.x + icon.width - inset, top: icon.y, depth: icon.height };
   }
 
   #scheduleCheck(token) {
