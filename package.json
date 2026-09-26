@@ -1,0 +1,17 @@
+{
+  "name": "desktop-pet",
+  "version": "0.1.0",
+  "description": "A tiny cartoon creature that lives on your Windows desktop.",
+  "private": true,
+  "type": "module",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "dev": "electron . --dev"
+  },
+  "author": "Anil Swami",
+  "license": "UNLICENSED",
+  "devDependencies": {
+    "electron": "^44.4.5"
+  }
+}

@@ -1,0 +1,17 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <!-- Only load code, styles and images that ship with the app. -->
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self'">
+  <title>Desktop Pet</title>
+  <link rel="stylesheet" href="styles/main.css">
+</head>
+<body>
+  <div id="pet" class="pet" role="img" aria-label="Desktop pet">
+    <img class="pet__sprite" src="../../assets/characters/default/pet.svg" alt="" draggable="false">
+  </div>
+  <script type="module" src="renderer.js"></script>
+</body>
+</html>

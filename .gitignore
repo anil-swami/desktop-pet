@@ -1,0 +1,27 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+out/
+release/
+
+# Logs
+*.log
+logs/
+npm-debug.log*
+
+# Secrets and local configuration
+.env
+.env.*
+*.local.json
+
+# Test coverage
+coverage/
+
+# OS and editor clutter
+Thumbs.db
+Desktop.ini
+.DS_Store
+*.tmp
+*.swp
