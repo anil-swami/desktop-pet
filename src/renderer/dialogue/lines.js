@@ -14,6 +14,17 @@ export const LINES = Object.freeze({
   grab: ['Whoa!', 'Put me down!', 'Wheee!', 'Where are we going?'],
   dizzy: ['Ouch...', 'Dizzy...', 'The room is spinning...'],
   welcomeBack: ['Welcome back!', "You're back!", 'I missed you!'],
+  petted: ['Purr...', 'Hehe, more!', 'I like that!', 'Mmm, nice.'],
+  eat: ['Yum!', 'Crunchy!', 'Thank you!', 'Nom nom!'],
+  woken: ['*yawn*... what?', 'Five more minutes...', "I'm up, I'm up!"],
+  jumpForJoy: ['Wheee!', 'Yay!', 'Boing!'],
+
+  // Answers to menu orders
+  comeHere: ['Here I am!', 'Coming!', 'You called?'],
+  sitOk: ['Sitting!', 'OK!', 'Like this?'],
+  sleepOk: ['Nap time...', 'Goodnight...'],
+  stopOk: ['OK, OK!', 'Stopping!', 'Freeze!'],
+  zoomies: ['ZOOMIES!', 'Wheee!', 'Catch me!'],
 
   // Things that happen
   startle: ['Eek!', 'Whoa!', 'You scared me!'],

@@ -2,7 +2,7 @@
 
 A tiny cartoon creature that lives on your Windows desktop. Built with Electron and vanilla JavaScript.
 
-> **Status:** Phases 1–10 — Pip lives on its own: it wanders, dashes, hops, sits and naps, and hops between desktop icons whenever your desktop is visible. It notices which app you're using, reacts to your cursor, can be dragged and thrown, and talks in speech and thought bubbles.
+> **Status:** Phases 1–11 — Pip lives on its own: it wanders, dashes, hops, sits and naps, and hops between desktop icons whenever your desktop is visible. It notices which app you're using, talks in speech and thought bubbles, and you can pet it, feed it, throw it, and tell it to come, sit, sleep or stop.
 
 ## Requirements
 
@@ -26,7 +26,7 @@ npm run build:helper   # force a rebuild of the Windows helper (normally automat
 
 `npm start` and `npm run dev` first compile the small Windows helper (`build/windows-helper.exe`) if its source changed. See [Windows helper](#windows-helper).
 
-**Right-click menu:** what Pip is doing, **Live on its own** (autonomy on/off), **Speech bubbles**, **Notice which app I use**, and **Quit**. In dev mode it adds energy and mood, plus **Mouse** (ignore / curious / follow / shy), **Desktop icons** (visit one, hop down), **Movement**, **Play animation**, **Play all animations**, **Test speech bubble** and **Open DevTools**.
+**Right-click Pip** for the pet menu (see [Interacting with Pip](#interacting-with-pip)). In dev mode the menu also shows energy and mood, and a **Developer** submenu: **Mouse** modes, **Desktop icons**, **Movement**, **Play animation**, **Play all animations**, **Test speech bubble** and **Open DevTools**.
 
 Set the log level explicitly with `PET_LOG_LEVEL` (`debug`, `info`, `warn`, `error`, `silent`):
 
@@ -34,9 +34,39 @@ Set the log level explicitly with `PET_LOG_LEVEL` (`debug`, `info`, `warn`, `err
 $env:PET_LOG_LEVEL = "debug"; npm start
 ```
 
-**Playing with Pip:** move the cursor near it and it looks at you. Click it and it's happy (poke it too often and it's confused). Drag it up and let go and it falls, or flick it and it flies and bounces off the screen edge. Minimise your windows and it goes icon-hopping.
+**Playing with Pip:** click it, double-click it, rub the cursor back and forth over it to pet it, drag and throw it, or feed it from the menu. Minimise your windows and it goes icon-hopping.
 
 **To quit:** right-click the pet → **Quit**, or press `Ctrl+C` in the terminal that launched it.
+
+## Interacting with Pip
+
+| Do this | Pip |
+|---|---|
+| Click | happy ("Hehe!"). Four quick pokes: confused |
+| Double-click | jumps for joy |
+| Rub the cursor back and forth over it (no clicking) | **petting**: hearts, "Purr..." |
+| Click while it sleeps | wakes up ("Five more minutes...") |
+| Drag and let go / flick | falls, or flies and bounces off the screen edge |
+| Move the cursor near it | looks at you |
+
+**The pet menu** (right-click Pip):
+
+| Item | What happens |
+|---|---|
+| Come here | Pip follows your cursor for a moment: move the mouse where you want it, and it stops once the cursor settles |
+| Sit | sits and stays (up to 3 minutes) |
+| Follow mouse | keeps following the cursor until unticked |
+| Sleep / Wake up | naps until woken (or 5 minutes) / wakes up |
+| Run! | zoomies: races to one side of the screen and back |
+| Stop | stops everything and stays put for 30 s |
+| Pet Pip | hearts and a happy wiggle |
+| Feed Pip | a cookie drops nearby; Pip runs over and eats it (energy and mood up) |
+| Live on its own | autonomy on/off; menu orders still work when it's off |
+| Speech bubbles | bubbles on/off |
+| Notice which app I use | app awareness on/off |
+| Settings... | Phase 12 |
+
+Any order is cut short by the next order, a click or a drag.
 
 ## Build
 
@@ -72,24 +102,29 @@ desktop-pet/
 │       │   ├── Character.js         The pet as the app sees it (animation, movement, blinking)
 │       │   ├── AnimationController.js  Which frame to show, and when (no DOM)
 │       │   ├── MovementController.js   Position, walking, jumping, gravity, platforms (no DOM)
-│       │   └── CharacterView.js     The only DOM code for the pet
+│       │   ├── CharacterView.js     The pet's DOM element
+│       │   └── EffectsView.js       Hearts and crumbs
 │       ├── behavior/
 │       │   ├── BehaviorManager.js   The autonomous loop, interruptions, app reactions
 │       │   ├── BehaviorScheduler.js Weighted choice with priorities and cooldowns
 │       │   ├── Personality.js       Energy, boredom, mood, curiosity
-│       │   └── activities.js        What the pet can decide to do
+│       │   ├── activities.js        What the pet can decide to do
+│       │   └── orders.js            What you can ask it to do (come, sit, feed...)
 │       ├── dialogue/
 │       │   ├── lines.js             Everything Pip can say, by topic
 │       │   ├── DialogueManager.js   When a line may appear: priorities, gaps, cooldowns (no DOM)
 │       │   └── BubbleView.js        The bubble element: placement, speech/thought style
 │       ├── interaction/
 │       │   ├── ClickThrough.js      Clickable pet, click-through everywhere else
-│       │   ├── MouseInteraction.js  Noticing the cursor, clicks, drag and throw
-│       │   └── DesktopInteraction.js  Visiting desktop icons: walk, leap, sit, hop down
+│       │   ├── MouseInteraction.js  Cursor, clicks, double-clicks, petting, drag and throw
+│       │   ├── DesktopInteraction.js  Visiting desktop icons: walk, leap, sit, hop down
+│       │   ├── Treats.js            Treats falling and waiting to be eaten (no DOM)
+│       │   └── TreatView.js         The treat's DOM element
 │       ├── dev/demos.js         "Play all animations" and "Movement demo"
 │       ├── index.html
-│       └── styles/              main.css (page), character.css (pet + motions), bubble.css
+│       └── styles/              main.css, character.css (pet + motions), bubble.css, effects.css
 ├── assets/characters/default/   Pip: character.json + 13 SVG frames
+├── assets/items/treat.svg   The cookie you can feed Pip
 └── tests/                   Unit tests (node --test)
 ```
 
@@ -212,6 +247,8 @@ Pip decides what to do by itself. There's no giant if/else: each **activity** sa
 
 **The scheduler** (`BehaviorScheduler.js`) drops activities still on **cooldown** and keeps only the highest **priority** tier. It then picks by **weight**: an activity with weight 4 is twice as likely as one with weight 2. All randomness goes through one `Random` object, so tests can use a seed and get the same choices every run.
 
+**Orders** (`orders.js`) are what you ask for: come, sit, sleep, run, stop, pet, feed. They're written like activities, but `BehaviorManager.order()` runs them straight away. They skip any pause, run even when autonomy is off, and set their own pause afterwards (`holdMs`, e.g. 30 s after Stop). A treat left on the floor is picked up later by the `eat-leftovers` activity.
+
 **Interruptions:** a click, a drag or a menu command calls `interrupt(reason, pause)`. The running activity's `wait()` resolves `false` and its walk stops, so the activity simply returns. The loop then rests for a few seconds (20 s after a menu command) before choosing again.
 
 **Context changes behavior:**
@@ -289,7 +326,9 @@ off               ─▶ nothing
 
 | Input | Reaction |
 |---|---|
-| Click | `happy`; 4 pokes within 2.5 s → `confused` |
+| Click | `happy`; 4 pokes within 2.5 s → `confused`; if asleep → `wake` |
+| Second click within 350 ms | jump for joy |
+| Rubbing: 4 direction changes over the pet within 1.5 s, strokes ≥ 10 px | petting (cooldown 4 s) |
 | Press and move 5+ px | Picked up: everything stops, Pip dangles (`fall`) and follows the cursor |
 | Let go | Falls with the cursor's last speed: a flick throws it, and it bounces off screen edges |
 | Landing after a fall higher than 220 px | Dizzy (`confused`) |
@@ -491,7 +530,7 @@ Everything stays on your PC and in memory: nothing is logged in bulk, stored or 
 8. ✅ Personality engine
 9. ✅ Autonomous behavior (8 and 9 were brought forward together with 7)
 10. ✅ Speech bubbles
-11. Character interaction and pet menu
+11. ✅ Character interaction and pet menu
 12. Settings
 13. System tray
 14. Start with Windows

@@ -38,6 +38,11 @@ export const MOUSE_DEFAULTS = Object.freeze({
   bigFall: 220,              // px; landing after a bigger fall makes the pet dizzy
   pokeWindowMs: 2500,
   pokesForConfused: 4,
+  doubleClickMs: 350,        // second click within this: jump for joy
+  rubTurns: 4,               // petting = rubbing back and forth over the pet this many times...
+  rubWindowMs: 1500,         // ...within this time...
+  rubMinTravelPx: 10,        // ...each stroke at least this long
+  petCooldownMs: 4000,
   moveEvaluateMs: 100,       // evaluate at most this often while the mouse moves
   evaluateEveryMs: 150,      // re-check this often while engaged, even if the mouse is still
 });
@@ -72,6 +77,9 @@ export class MouseInteraction {
   #releasePointer = null;
   #resumeAfterDrop = null;
   #pokes = [];
+  #lastClickAt = -Infinity;
+  #rub = { lastX: null, direction: 0, travel: 0, turns: [] };
+  #lastPetAt = -Infinity;
 
   #interaction = 0;   // bumped by every click/grab/reaction; stale follow-ups check it
   #reaction = null;   // id of the reaction animation currently playing
@@ -108,6 +116,11 @@ export class MouseInteraction {
 
   get dragging() {
     return this.#dragging;
+  }
+
+  // Last known cursor position in window coordinates, or null.
+  get pointer() {
+    return this.#pointer ? { x: this.#pointer.x, y: this.#pointer.y } : null;
   }
 
   // True while the mouse is in charge of the pet (pressed, dragged, reacting,
@@ -169,6 +182,7 @@ export class MouseInteraction {
       this.#pressMove(x, y, time);
       return;
     }
+    this.#detectPetting(x, y, time);
     if (time - this.#lastEvaluate >= this.#options.moveEvaluateMs) this.evaluate(time);
   }
 
@@ -236,6 +250,42 @@ export class MouseInteraction {
 
   #isFree() {
     return !this.#press && !this.#character.held && this.#reaction === null;
+  }
+
+  #isOverPet(x, y) {
+    const { x: px, y: py } = this.#character.position;
+    const { width, height } = this.#character.size;
+    return Math.abs(x - px) <= width / 2 && y <= py && y >= py - height;
+  }
+
+  // Petting: rubbing the cursor back and forth over the pet (no clicking).
+  // Counts direction changes after strokes of at least rubMinTravelPx.
+  #detectPetting(x, y, time) {
+    const rub = this.#rub;
+    if (this.#character.held || !this.#isOverPet(x, y)) {
+      rub.lastX = null;
+      rub.direction = 0;
+      rub.turns = [];
+      return;
+    }
+    if (rub.lastX !== null && x !== rub.lastX) {
+      const direction = Math.sign(x - rub.lastX);
+      if (direction !== rub.direction) {
+        if (rub.direction !== 0 && rub.travel >= this.#options.rubMinTravelPx) rub.turns.push(time);
+        rub.direction = direction;
+        rub.travel = 0;
+      }
+      rub.travel += Math.abs(x - rub.lastX);
+    }
+    rub.lastX = x;
+    rub.turns = rub.turns.filter((turn) => time - turn <= this.#options.rubWindowMs);
+
+    if (rub.turns.length >= this.#options.rubTurns && time - this.#lastPetAt >= this.#options.petCooldownMs) {
+      this.#lastPetAt = time;
+      rub.turns = [];
+      this.#log.debug('Petted');
+      this.#onInteract('pet');
+    }
   }
 
   #lookAt(dx, time) {
@@ -385,15 +435,30 @@ export class MouseInteraction {
   async #click(time) {
     const id = ++this.#interaction;
     const resume = this.#snapshot();
+    const asleep = this.#character.animation === 'sleep';
+    const double = time - this.#lastClickAt <= this.#options.doubleClickMs;
+    this.#lastClickAt = double ? -Infinity : time; // a third click starts a new pair
+
     this.#pokes = this.#pokes.filter((poke) => time - poke <= this.#options.pokeWindowMs);
     this.#pokes.push(time);
     const annoyed = this.#pokes.length >= this.#options.pokesForConfused;
     if (annoyed) this.#pokes = [];
-
-    this.#log.debug(annoyed ? 'Poked too often: confused' : 'Clicked: happy');
-    this.#onInteract(annoyed ? 'poked' : 'click');
     this.#character.stop();
-    await this.#react(annoyed ? 'confused' : 'happy', id);
+
+    if (asleep) {
+      // Clicking a sleeping pet wakes it up (a little grumpily).
+      this.#log.debug('Woken up by a click');
+      this.#onInteract('woken');
+      await this.#react('wake', id);
+    } else if (double && !annoyed) {
+      this.#log.debug('Double-clicked: jump for joy');
+      this.#onInteract('double-click');
+      await this.#character.jump();
+    } else {
+      this.#log.debug(annoyed ? 'Poked too often: confused' : 'Clicked: happy');
+      this.#onInteract(annoyed ? 'poked' : 'click');
+      await this.#react(annoyed ? 'confused' : 'happy', id);
+    }
     if (id === this.#interaction) this.#resume(resume);
   }
 

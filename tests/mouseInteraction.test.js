@@ -135,6 +135,84 @@ describe('MouseInteraction: clicks', () => {
   });
 });
 
+describe('MouseInteraction: petting, double-click, waking', () => {
+  // Rub horizontally across the pet's middle (pet centre is x=500, y 500-600).
+  const rub = (move, strokes, { y = 550, width = 30, dt = 60 } = {}) => {
+    for (let i = 0; i < strokes; i += 1) move(i % 2 === 0 ? 500 + width : 500 - width, y, dt);
+  };
+
+  function withEvents() {
+    const context = setup();
+    const events = [];
+    const mouse = new MouseInteraction({
+      character: context.character,
+      ticker: context.ticker,
+      now: () => 0,
+      onInteract: (kind) => events.push(kind),
+    });
+    let time = 50_000;
+    const move = (x, y, dt = 60) => { time += dt; mouse.handlePointerMove(x, y, time); };
+    const click = (dt = 100) => {
+      time += dt;
+      mouse.handlePointerDown(500, 550, time);
+      time += 30;
+      mouse.handlePointerUp(500, 550, time);
+    };
+    return { ...context, mouse, events, move, click };
+  }
+
+  test('rubbing back and forth over the pet is petting', () => {
+    const { events, move } = withEvents();
+    rub(move, 6);
+    assert.equal(events.filter((e) => e === 'pet').length, 1);
+  });
+
+  test('petting has a cooldown', () => {
+    const { events, move } = withEvents();
+    rub(move, 6);
+    rub(move, 6);
+    assert.equal(events.filter((e) => e === 'pet').length, 1);
+  });
+
+  test('rubbing beside the pet, or tiny jiggles, are not petting', () => {
+    const { events, move } = withEvents();
+    rub(move, 10, { y: 300 });             // above the pet
+    rub(move, 10, { width: 3 });           // strokes too short
+    rub(move, 6, { dt: 600 });             // too slow
+    assert.equal(events.includes('pet'), false);
+  });
+
+  test('a double-click makes the pet jump for joy', () => {
+    const { events, click, character } = withEvents();
+    click();
+    click(150);
+    assert.deepEqual(events.filter((e) => e !== 'press'), ['click', 'double-click']);
+    assert.equal(character.grounded, false);
+  });
+
+  test('clicks further apart are two single clicks', () => {
+    const { events, click } = withEvents();
+    click();
+    click(800);
+    assert.deepEqual(events.filter((e) => e !== 'press'), ['click', 'click']);
+  });
+
+  test('clicking a sleeping pet wakes it up', () => {
+    const { events, click, character } = withEvents();
+    character.play('sleep');
+    click();
+    assert.ok(events.includes('woken'));
+    assert.equal(character.animation, 'wake');
+  });
+
+  test('pointer is the last known cursor position', () => {
+    const { mouse, move } = withEvents();
+    assert.equal(mouse.pointer, null);
+    move(123, 456);
+    assert.deepEqual(mouse.pointer, { x: 123, y: 456 });
+  });
+});
+
 describe('MouseInteraction: drag and drop', () => {
   test('moving a press past the threshold picks the pet up', () => {
     const { character, mouse, down, move } = setup();

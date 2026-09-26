@@ -1,0 +1,68 @@
+/* Particles (hearts, crumbs) and the treat. All click-through. */
+
+.effect {
+  position: absolute;
+  pointer-events: none;
+}
+
+/* Hearts: rise from the head, drift sideways, fade. Positioned inside .pet. */
+.effect--heart {
+  left: 50%;
+  top: 10%;
+  z-index: 0; /* above the pet, but behind a speech bubble */
+  color: #ff5f86;
+  font: 700 22px/1 "Segoe UI Symbol", "Segoe UI", sans-serif;
+  -webkit-text-stroke: 1.5px #3a2618;
+  opacity: 0;
+  animation: effect-heart 1100ms ease-out var(--delay, 0ms) forwards;
+}
+
+@keyframes effect-heart {
+  0%   { opacity: 0; transform: translate(-50%, 0) scale(0.5); }
+  20%  { opacity: 1; transform: translate(calc(-50% + var(--dx) * 0.3), -14px) scale(1.1); }
+  100% { opacity: 0; transform: translate(calc(-50% + var(--dx)), -70px) scale(0.9); }
+}
+
+/* Crumbs: a small burst where the treat was. Positioned in the page. */
+.effect--crumb {
+  width: 6px;
+  height: 6px;
+  margin: -3px 0 0 -3px;
+  border: 1.5px solid #3a2618;
+  border-radius: 2px;
+  background: #dca35e;
+  animation: effect-crumb 520ms ease-out forwards;
+}
+
+@keyframes effect-crumb {
+  0%   { opacity: 1; transform: translate(0, 0) rotate(0deg); }
+  60%  { opacity: 1; transform: translate(var(--dx), var(--dy)) rotate(120deg); }
+  100% { opacity: 0; transform: translate(var(--dx), calc(var(--dy) + 22px)) rotate(200deg); }
+}
+
+/* The treat: moved with a transform by TreatView. */
+.treat {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 30px;
+  height: 30px;
+  pointer-events: none;
+  will-change: transform;
+}
+
+.treat.is-eaten {
+  transition: opacity 220ms ease-in, scale 220ms ease-in;
+  opacity: 0;
+  scale: 0.3;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .effect--heart { animation: effect-fade 900ms ease-out var(--delay, 0ms) forwards; transform: translate(calc(-50% + var(--dx)), -30px); }
+  .effect--crumb { animation: effect-fade 300ms linear forwards; }
+}
+
+@keyframes effect-fade {
+  0%, 60% { opacity: 1; }
+  100% { opacity: 0; }
+}

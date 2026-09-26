@@ -1,7 +1,8 @@
 // The pet's autonomous life: an endless loop of "pick an activity, do it".
 //
 //   ┌──────────────────────────────────────────────────────────────────┐
-//   │ paused? busy? ─yes─▶ rest until woken                            │
+//   │ an order from you (menu, petting, feeding)? ─yes─▶ do it now     │
+//   │ paused? busy? switched off? ─yes─▶ rest until woken              │
 //   │ reaction queued (app switch, user back)? ─yes─▶ do that          │
 //   │ else build context ─▶ scheduler picks by weight ─▶ run activity │
 //   │ personality.spend(activity.kind, how long it took)               │
@@ -11,6 +12,9 @@
 // the running activity's pending wait() resolves false, the activity returns,
 // and the loop rests for `pause` before choosing again. The interrupter decides
 // what the pet does in the meantime.
+//
+// Orders (see orders.js) jump the queue, run even when autonomy is off, and
+// set their own pause afterwards (holdMs).
 //
 // Phase 7 plugs in here: onAppChanged() reacts to the app in front, and the
 // desktop appearing makes icon-hopping the top priority.
@@ -49,6 +53,8 @@ export class BehaviorManager {
   #now;
   #isBusy;
   #speak;
+  #tools;
+  #extraContext;
 
   #running = false;
   #enabled = true;
@@ -58,7 +64,8 @@ export class BehaviorManager {
   #wakeLoop = null;
   #state = 'IDLE';
   #current = null;      // activity being performed
-  #reactions = [];
+  #orders = [];         // from the user: run first, even when autonomy is off
+  #reactions = [];      // to events (app switch, user back)
 
   #app = null;
   #userAway = false;
@@ -80,6 +87,10 @@ export class BehaviorManager {
     isBusy = () => false,
     // speak({ topic, style, priority, chance, ... }): show a line (DialogueManager.topic).
     speak = () => {},
+    // Extra tools handed to activities and orders (e.g. treats, effects, pointer).
+    tools = {},
+    // Extra context values for activity weights, e.g. () => ({ treats: 2 }).
+    extraContext = () => ({}),
   }) {
     this.#character = character;
     this.#desktop = desktop;
@@ -91,6 +102,8 @@ export class BehaviorManager {
     this.#now = now;
     this.#isBusy = isBusy;
     this.#speak = speak;
+    this.#tools = tools;
+    this.#extraContext = extraContext;
     this.#scheduler = new BehaviorScheduler({ random, now });
   }
 
@@ -141,6 +154,18 @@ export class BehaviorManager {
     this.interrupt(enabled ? 'switched on' : 'switched off', 0);
     if (!enabled && !this.#character.held) this.#character.stop();
     this.#setState(enabled ? 'IDLE' : 'OFF');
+  }
+
+  // Do what the user asked (see orders.js), right now. Replaces any earlier
+  // order that hasn't finished, and ignores pauses from before.
+  order(activity) {
+    this.#orders = [activity];
+    this.#pausedUntil = 0;
+    this.#token += 1;
+    this.#cancelWaits();
+    if (!this.#character.held) this.#character.stop();
+    this.#log.info(`Order: ${activity.name.replace(/^order-/, '')}`);
+    this.#wakeLoop?.();
   }
 
   // Something else takes over (user, command, a reaction). The current
@@ -209,7 +234,19 @@ export class BehaviorManager {
 
   async #loop() {
     while (this.#running) {
+      if (this.#orders.length > 0) {
+        if (this.#character.held) {
+          await this.#rest(500); // can't obey while dangling from the cursor
+          continue;
+        }
+        const order = this.#orders.shift();
+        const token = this.#token;
+        await this.#perform(order, token, null);
+        if (token === this.#token && order.holdMs) this.#pausedUntil = Math.max(this.#pausedUntil, this.#now() + order.holdMs);
+        continue;
+      }
       if (!this.#enabled) {
+        this.#setState('OFF');
         await this.#rest(60_000);
         continue;
       }
@@ -251,10 +288,12 @@ export class BehaviorManager {
         if (token !== this.#token) return;
       }
       await activity.run({
+        ...this.#tools,
         character: this.#character,
         desktop: this.#desktop,
         random: this.#random,
         context: context ?? {},
+        adjust: (changes) => this.#personality.adjust(changes),
         wait: (ms) => this.#wait(ms, token),
         active: () => token === this.#token,
         spot: (min, max) => this.#spot(min, max),
@@ -274,6 +313,7 @@ export class BehaviorManager {
     const personality = this.#personality.snapshot();
     const calm = this.#app?.fullscreen === true;
     return {
+      ...this.#extraContext(),
       personality,
       freeIcons: calm ? 0 : await this.#countFreeIcons(),
       onIcon: this.#character.standingOn !== null,

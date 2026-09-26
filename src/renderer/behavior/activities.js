@@ -12,11 +12,24 @@
 //               say(topic) / think(topic) offer a line from dialogue/lines.js;
 //               the dialogue rules decide whether it actually appears.
 //
-// Context (ctx): { personality, freeIcons, onIcon, desktopFresh, userAway, calm, app }
+// Context (ctx): { personality, freeIcons, onIcon, desktopFresh, userAway, calm, app, treats }
 //
 // Adding a behavior = adding an object here. See README "Adding a behavior".
 
+import { eatTreat } from './orders.js';
+
 export const ACTIVITIES = [
+  {
+    // A treat left on the floor (e.g. you fed it and then dragged it away): go get it.
+    name: 'eat-leftovers',
+    state: 'HAPPY',
+    kind: 'react',
+    priority: ({ treats }) => (treats > 0 ? 4 : 1),
+    weight: ({ treats }) => (treats > 0 ? 10 : 0),
+    async run(tools) {
+      await eatTreat(tools);
+    },
+  },
   {
     name: 'look-around',
     state: 'IDLE',

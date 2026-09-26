@@ -66,6 +66,9 @@ export const TEST_ANIMATIONS = {
   fall: { frames: [frame('f1')], loop: true, next: null, motion: 'flail', aliasOf: null },
   surprised: { frames: [frame('s1', 200)], loop: false, next: 'idle', motion: 'jolt', aliasOf: null },
   confused: { frames: [frame('c1', 200)], loop: false, next: 'idle', motion: 'tilt', aliasOf: null },
+  sit: { frames: [frame('sit')], loop: true, next: null, motion: null, aliasOf: null },
+  sleep: { frames: [frame('zz')], loop: true, next: null, motion: null, aliasOf: null },
+  wake: { frames: [frame('wake')], loop: false, next: 'idle', motion: null, aliasOf: null },
 };
 
 // Let pending promise callbacks (e.g. "after the reaction, resume walking") run.

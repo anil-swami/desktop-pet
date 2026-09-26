@@ -1,6 +1,15 @@
-// Builds the native right-click menu for the pet.
-// Developer items (animation and movement testing, DevTools) only appear with
-// `npm run dev`. Grows into the full pet menu (Sit, Follow, Sleep...) in Phase 11.
+// Builds the native right-click pet menu:
+//
+//   Pip · sitting
+//   ─────────────
+//   Come here / Sit / Follow mouse / Sleep (or Wake up) / Run! / Stop
+//   ─────────────
+//   Pet Pip / Feed Pip
+//   ─────────────
+//   Live on its own / Speech bubbles / Notice which app I use / Settings...
+//   ─────────────
+//   Developer ▸   (only with `npm run dev`)
+//   Quit
 
 import { app, Menu } from 'electron';
 
@@ -26,11 +35,30 @@ export function buildPetMenu({
 }) {
   const name = character?.name ?? 'Desktop Pet';
   const doing = behavior?.state ? ` · ${behavior.state.toLowerCase().replaceAll('_', ' ')}` : '';
-  const template = [{ label: `${name}${doing}`, enabled: false }];
+  const command = (label, payload) => ({ label, click: () => sendCommand(payload) });
+  const following = mouseMode === 'follow';
+  const sleeping = behavior?.state === 'SLEEPING';
+
+  const template = [{ label: `${menuText(name)}${doing}`, enabled: false }];
   if (isDev && behavior) {
     template.push({ label: `energy ${behavior.energy ?? '?'} · mood ${behavior.mood ?? '?'} · ${behavior.activity ?? 'none'}`, enabled: false });
   }
   template.push(
+    { type: 'separator' },
+    command('Come here', { type: 'come-here' }),
+    command('Sit', { type: 'sit' }),
+    {
+      label: 'Follow mouse',
+      type: 'checkbox',
+      checked: following,
+      click: () => sendCommand({ type: 'follow', enabled: !following }),
+    },
+    sleeping ? command('Wake up', { type: 'wake' }) : command('Sleep', { type: 'sleep' }),
+    command('Run!', { type: 'zoomies' }),
+    command('Stop', { type: 'stop' }),
+    { type: 'separator' },
+    command(`Pet ${menuText(name)}`, { type: 'pet' }),
+    command(`Feed ${menuText(name)}`, { type: 'feed' }),
     { type: 'separator' },
     {
       label: 'Live on its own',
@@ -51,10 +79,14 @@ export function buildPetMenu({
       enabled: appAwareness.available,
       click: () => setNoticeApps(!appAwareness.enabled),
     },
+    { label: 'Settings... (coming soon)', enabled: false },
     { type: 'separator' },
   );
   if (isDev) {
-    template.push(...developerItems({ character, mouseMode, desktopIcons, sendCommand, openDevTools }), { type: 'separator' });
+    template.push(
+      { label: 'Developer', submenu: developerItems({ character, mouseMode, desktopIcons, sendCommand, openDevTools }) },
+      { type: 'separator' },
+    );
   }
   template.push({ label: 'Quit', click: () => app.quit() });
   return Menu.buildFromTemplate(template);
@@ -104,7 +136,6 @@ function developerItems({ character, mouseMode, desktopIcons, sendCommand, openD
           command('Walk right', { type: 'walk', direction: 'right' }),
           command('Run left', { type: 'run', direction: 'left' }),
           command('Run right', { type: 'run', direction: 'right' }),
-          command('Stop', { type: 'stop' }),
           { type: 'separator' },
           command('Jump', { type: 'jump' }),
           command('Turn around', { type: 'turn-around' }),

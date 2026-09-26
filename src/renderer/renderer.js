@@ -11,6 +11,10 @@ import { ClickThrough } from './interaction/ClickThrough.js';
 import { MouseInteraction } from './interaction/MouseInteraction.js';
 import { DesktopInteraction } from './interaction/DesktopInteraction.js';
 import { BehaviorManager } from './behavior/BehaviorManager.js';
+import { ORDERS } from './behavior/orders.js';
+import { EffectsView } from './character/EffectsView.js';
+import { Treats } from './interaction/Treats.js';
+import { TreatView } from './interaction/TreatView.js';
 import { DialogueManager } from './dialogue/DialogueManager.js';
 import { BubbleView } from './dialogue/BubbleView.js';
 import { playMovementDemo, playShowcase, stopDemos } from './dev/demos.js';
@@ -26,6 +30,7 @@ let character = null;
 let mouse = null;
 let desktop = null;
 let behavior = null;
+let treats = null;
 
 // Speech bubbles. The bubble reads the pet's position lazily (the pet is
 // created later) and re-checks the screen edges whenever the pet moves.
@@ -66,10 +71,14 @@ window.addEventListener('resize', () => {
 // --- What the user does with the mouse, as the behavior engine sees it --------
 
 // pause: autonomy waits (ms) · mood/boredom: personality changes · say: a dialogue topic
+// order: something the pet does in response (see behavior/orders.js)
 const MOUSE_EFFECTS = {
   press:          { pause: 4000 },
   click:          { mood: +6, boredom: -15, say: 'click' },
+  'double-click': { mood: +4, say: 'jumpForJoy' },
   poked:          { mood: -8, say: 'poked' },
+  woken:          { mood: -3, say: 'woken' },
+  pet:            { order: ORDERS.pet },
   grab:           { pause: 6000, say: 'grab' },
   'dropped-hard': { mood: -5, say: 'dizzy' },
   startle:        { pause: 3000, say: 'startle', priority: 'event' },
@@ -80,13 +89,14 @@ const MOUSE_EFFECTS = {
 function onMouseInteraction(kind) {
   const effect = MOUSE_EFFECTS[kind];
   if (!effect) return;
-  const { pause, say, priority = 'reply', chance, ...changes } = effect;
+  const { pause, say, order, priority = 'reply', chance, ...changes } = effect;
   if (pause) {
     stopDemos();
     behavior?.interrupt(`mouse: ${kind}`, pause);
   }
   if (Object.keys(changes).length) behavior?.personality.adjust(changes);
   if (say) dialogue.topic(say, { priority, chance });
+  if (order) behavior?.order(order);
 }
 
 // Comments on desktop icon moments.
@@ -107,8 +117,20 @@ function spotX(name) {
   return Object.hasOwn(SPOTS, name) ? SPOTS[name] * width : null;
 }
 
-// A direct movement order overrides "follow the mouse" and any icon visit.
-const MOVEMENT_COMMANDS = new Set(['walk', 'run', 'stop', 'move-to', 'movement-demo', 'drop', 'visit-icon']);
+// Pet menu orders: run by the behavior engine (see behavior/orders.js).
+const ORDER_COMMANDS = {
+  'come-here': ORDERS.come,
+  sit: ORDERS.sit,
+  sleep: ORDERS.sleep,
+  wake: ORDERS.wake,
+  zoomies: ORDERS.zoomies,
+  stop: ORDERS.stop,
+  pet: ORDERS.pet,
+  feed: ORDERS.feed,
+};
+
+// A direct movement order (developer menu) overrides "follow the mouse" and any icon visit.
+const MOVEMENT_COMMANDS = new Set(['walk', 'run', 'move-to', 'movement-demo', 'drop', 'visit-icon']);
 // Anything you ask for by hand pauses the pet's own ideas for a while.
 const MANUAL_PAUSE_MS = 20_000;
 
@@ -135,6 +157,21 @@ function handleCommand(command) {
   }
   if (command.type === 'speech') {
     dialogue.setEnabled(command.enabled === true);
+    return;
+  }
+  // Orders from the pet menu.
+  if (Object.hasOwn(ORDER_COMMANDS, command.type)) {
+    stopDemos();
+    if (mouse?.mode === 'follow') mouse.setMode('curious'); // any order ends following
+    behavior?.order(ORDER_COMMANDS[command.type]);
+    return;
+  }
+  if (command.type === 'follow') {
+    stopDemos();
+    const follow = command.enabled === true;
+    if (follow && character.standingOn !== null) desktop?.leave();
+    mouse?.setMode(follow ? 'follow' : 'curious');
+    if (follow) dialogue.topic('comeHere', { priority: 'reply' });
     return;
   }
   if (command.type === 'test-bubble') {
@@ -172,9 +209,6 @@ function handleCommand(command) {
       break;
     case 'run':
       character.run(command.direction);
-      break;
-    case 'stop':
-      character.stop();
       break;
     case 'jump':
       character.jump();
@@ -261,6 +295,14 @@ async function start() {
     onEvent: (kind, icon) => DESKTOP_LINES[kind]?.(icon),
   });
 
+  const effects = new EffectsView({ pet, random: chance });
+  treats = new Treats({
+    view: new TreatView({ effects }),
+    ticker,
+    getFloorY: () => character.floorY,
+    log: createLogger('treats'),
+  });
+
   behavior = new BehaviorManager({
     character,
     desktop,
@@ -269,6 +311,8 @@ async function start() {
     log: createLogger('behavior'),
     isBusy: () => mouse.busy,
     speak: ({ topic, ...options }) => dialogue.topic(topic, options),
+    tools: { treats, effects, pointer: () => mouse.pointer },
+    extraContext: () => ({ treats: treats.count }),
   });
 
   api.onCommand(handleCommand);
@@ -288,6 +332,7 @@ async function start() {
 // Stop the loop and all timers if the page is ever torn down.
 window.addEventListener('beforeunload', () => {
   dialogue.dispose();
+  treats?.dispose();
   behavior?.dispose();
   desktop?.dispose();
   mouse?.dispose();
