@@ -21,11 +21,32 @@ export const MOUSE_MODE_ITEMS = Object.freeze([
 
 const MAX_ICONS_IN_MENU = 15;
 
-export function buildPetMenu({ character, isDev, mouseMode, desktopIcons, sendCommand, openDevTools }) {
-  const template = [
-    { label: character?.name ?? 'Desktop Pet', enabled: false },
+export function buildPetMenu({
+  character, isDev, mouseMode, behavior, appAwareness, desktopIcons, sendCommand, setNoticeApps, openDevTools,
+}) {
+  const name = character?.name ?? 'Desktop Pet';
+  const doing = behavior?.state ? ` · ${behavior.state.toLowerCase().replaceAll('_', ' ')}` : '';
+  const template = [{ label: `${name}${doing}`, enabled: false }];
+  if (isDev && behavior) {
+    template.push({ label: `energy ${behavior.energy ?? '?'} · mood ${behavior.mood ?? '?'} · ${behavior.activity ?? 'none'}`, enabled: false });
+  }
+  template.push(
     { type: 'separator' },
-  ];
+    {
+      label: 'Live on its own',
+      type: 'checkbox',
+      checked: behavior?.enabled ?? true,
+      click: () => sendCommand({ type: 'autonomy', enabled: !(behavior?.enabled ?? true) }),
+    },
+    {
+      label: appAwareness.available ? 'Notice which app I use' : 'Notice which app I use (unavailable)',
+      type: 'checkbox',
+      checked: appAwareness.enabled && appAwareness.available,
+      enabled: appAwareness.available,
+      click: () => setNoticeApps(!appAwareness.enabled),
+    },
+    { type: 'separator' },
+  );
   if (isDev) {
     template.push(...developerItems({ character, mouseMode, desktopIcons, sendCommand, openDevTools }), { type: 'separator' });
   }

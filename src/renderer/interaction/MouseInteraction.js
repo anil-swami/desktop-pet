@@ -110,6 +110,12 @@ export class MouseInteraction {
     return this.#dragging;
   }
 
+  // True while the mouse is in charge of the pet (pressed, dragged, reacting,
+  // fleeing, or following): the autonomous behavior waits.
+  get busy() {
+    return this.#press !== null || this.#dragging || this.#reaction !== null || this.#fleeing || this.#mode === 'follow';
+  }
+
   setMode(mode) {
     if (!MOUSE_MODES.includes(mode) || mode === this.#mode) return false;
     const wasFollowing = this.#mode === 'follow';
@@ -171,7 +177,7 @@ export class MouseInteraction {
     this.#pointer = { x, y, time };
     this.#press = { x, y, offsetX: 0, offsetY: 0 };
     this.#releasePointer = this.#holdPointer();
-    this.#onInteract();
+    this.#onInteract('press');
   }
 
   handlePointerUp(x, y, time) {
@@ -243,6 +249,7 @@ export class MouseInteraction {
     if (this.#character.isMoving) return;
     this.#lastStartle = time;
     this.#log.debug('Startled by a fast mouse');
+    this.#onInteract('startle');
     this.#character.face(dx > 0 ? 'right' : 'left');
     this.#react('surprised', ++this.#interaction);
   }
@@ -262,6 +269,7 @@ export class MouseInteraction {
     const targetX = x + direction * this.#options.fleeDistance;
 
     this.#fleeing = true;
+    this.#onInteract('flee');
     this.#log.debug(`Running away from the mouse to x=${Math.round(clamp(targetX, min, max))}`);
     this.#character.moveTo(targetX, { run: true, quiet: true }).then((arrived) => {
       this.#fleeing = false;
@@ -335,6 +343,7 @@ export class MouseInteraction {
     this.#samples = [{ x, y, time }];
     this.#character.grab();
     this.#onDragChange(true);
+    this.#onInteract('grab');
   }
 
   async #drop(time) {
@@ -350,6 +359,7 @@ export class MouseInteraction {
     const fall = this.#character.lastFallHeight;
     if (fall >= this.#options.bigFall) {
       this.#log.debug(`Dizzy after a ${Math.round(fall)}px fall`);
+      this.#onInteract('dropped-hard');
       await this.#react('confused', id);
       if (id !== this.#interaction) return;
     }
@@ -380,6 +390,7 @@ export class MouseInteraction {
     if (annoyed) this.#pokes = [];
 
     this.#log.debug(annoyed ? 'Poked too often: confused' : 'Clicked: happy');
+    this.#onInteract(annoyed ? 'poked' : 'click');
     this.#character.stop();
     await this.#react(annoyed ? 'confused' : 'happy', id);
     if (id === this.#interaction) this.#resume(resume);

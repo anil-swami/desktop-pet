@@ -70,7 +70,7 @@ describe('DesktopInteraction', () => {
   test('says why when nothing can be visited', async () => {
     const context = setup([COVERED, TOO_HIGH]);
     assert.equal(await drive(context.desktop.visit('random'), context.ticker), false);
-    assert.match(context.logs.at(-1), /No icon is free/);
+    assert.match(context.logs.at(-1), /icon is free to visit/);
 
     const hidden = setup();
     hidden.scan.visible = false;
@@ -119,6 +119,28 @@ describe('DesktopInteraction', () => {
     ticker.runTimers();
     await flush();
     assert.equal(desktop.visiting, null);
+  });
+
+  test('leaps straight from one icon to another', async () => {
+    const SECOND = { ...FOLDER, id: 'dddddddddddd', name: 'Photos', x: 400, y: 250 };
+    const context = setup([FOLDER, SECOND]);
+    const { character, desktop, ticker } = context;
+    await sitOnFolder(context);
+    const trip = desktop.visit(SECOND.id);
+    await flush();
+    assert.equal(character.grounded, false, 'took off from the icon, not the floor');
+    assert.equal(await drive(trip, ticker), true);
+    assert.equal(character.standingOn, SECOND.id);
+    assert.equal(character.position.y, SECOND.y);
+  });
+
+  test('a random visit never picks the icon already sat on', async () => {
+    const SECOND = { ...FOLDER, id: 'dddddddddddd', name: 'Photos', x: 400, y: 250 };
+    const context = setup([FOLDER, SECOND]);
+    await sitOnFolder(context);
+    assert.equal(await context.desktop.freeIconCount(), 1);
+    assert.equal(await drive(context.desktop.visit('random'), context.ticker), true);
+    assert.equal(context.character.standingOn, SECOND.id);
   });
 
   test('cancel() during the walk abandons the visit', async () => {

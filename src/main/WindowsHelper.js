@@ -1,27 +1,30 @@
-// Runs helpers/windows-helper.ps1 as a child process and talks to it in JSON
-// lines: {"id":1,"command":"desktop-icons"} in, {"id":1,"ok":true,"result":...} out.
+// Runs build/windows-helper.exe (compiled from helpers/WindowsHelper.cs) as a
+// child process and talks to it in JSON lines:
+//   requests:  {"id":1,"command":"desktop-icons"}  ->  {"id":1,"ok":true,"result":...}
+//   events:    {"event":"foreground","data":{...}}  (after "watch-foreground")
 //
-// - Started on first use (compiling its C# takes ~1-2 s once), then each
-//   request is fast.
-// - Stopped after a quiet period to free memory; restarted on the next request.
-// - If it cannot start at all (PowerShell missing or locked down by policy),
-//   the feature is marked unavailable instead of retrying forever.
+// - Started on first use (~0.2 s), then each request takes milliseconds.
+// - Stopped after a quiet period to free memory, unless something is watching
+//   for events; restarted (and re-subscribed) on demand or after a crash.
+// - If it cannot start at all (not built, blocked by policy...), the features
+//   that need it are marked unavailable instead of retrying forever.
 //
 // Only the fixed command names below are ever sent; nothing from the renderer
-// is passed to PowerShell.
+// is passed to the helper.
 
 import { spawn as nodeSpawn } from 'node:child_process';
+import fs from 'node:fs';
 import path from 'node:path';
 
-const DEFAULT_SCRIPT = path.join(import.meta.dirname, 'helpers', 'windows-helper.ps1');
-// Full path, so a different "powershell.exe" earlier in PATH can't be picked up.
-const POWERSHELL = path.join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
-const COMMANDS = new Set(['desktop-icons', 'ping']);
+const DEFAULT_EXECUTABLE = path.resolve(import.meta.dirname, '..', '..', 'build', 'windows-helper.exe');
+const COMMANDS = new Set(['desktop-icons', 'watch-foreground', 'unwatch-foreground', 'ping']);
+const MAX_RESTARTS_PER_MINUTE = 3;
 const silentLog = { debug() {}, info() {}, warn() {}, error() {} };
 
 export class WindowsHelper {
   #spawn;
-  #script;
+  #executable;
+  #exists;
   #petPid;
   #log;
   #idleMs;
@@ -36,31 +39,39 @@ export class WindowsHelper {
   #idleTimer = null;
   #startedAt = 0;
   #unavailableReason = null;
+  #watching = false;
+  #onEvent = null;
+  #restarts = []; // times of automatic restarts, to stop a crash loop
 
   constructor({
     petPid,
     log = silentLog,
     spawn = nodeSpawn,
-    script = DEFAULT_SCRIPT,
+    executable = DEFAULT_EXECUTABLE,
+    exists = fs.existsSync,
     idleMs = 120_000,
-    timeoutMs = 20_000,
+    timeoutMs = 10_000,
     platform = process.platform,
   }) {
     this.#petPid = petPid;
     this.#log = log;
     this.#spawn = spawn;
-    this.#script = script;
+    this.#executable = executable;
+    this.#exists = exists;
     this.#idleMs = idleMs;
     this.#timeoutMs = timeoutMs;
     this.#platform = platform;
   }
 
   get available() {
-    return this.#platform === 'win32' && this.#unavailableReason === null;
+    return this.unavailableReason === null;
   }
 
   get unavailableReason() {
-    return this.#platform === 'win32' ? this.#unavailableReason : 'only available on Windows';
+    if (this.#platform !== 'win32') return 'only available on Windows';
+    if (this.#unavailableReason) return this.#unavailableReason;
+    if (!this.#exists(this.#executable)) return 'helper not built (run "npm start", which builds it)';
+    return null;
   }
 
   get running() {
@@ -85,6 +96,23 @@ export class WindowsHelper {
     });
   }
 
+  // Receive foreground-window events: listener(eventName, data).
+  watch(listener) {
+    this.#onEvent = listener;
+    const done = this.request('watch-foreground');
+    this.#watching = true; // set after: re-subscribing is only for later restarts
+    return done;
+  }
+
+  unwatch() {
+    this.#watching = false;
+    this.#onEvent = null;
+    if (!this.#child) return Promise.resolve();
+    const done = this.request('unwatch-foreground').catch(() => {});
+    this.#scheduleIdleStop();
+    return done;
+  }
+
   stop() {
     clearTimeout(this.#idleTimer);
     const child = this.#child;
@@ -102,10 +130,10 @@ export class WindowsHelper {
     this.#startedAt = Date.now();
     this.#log.info('Starting Windows helper');
 
-    const child = this.#spawn(POWERSHELL, [
-      '-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Sta',
-      '-File', this.#script, '-PetPid', String(this.#petPid),
-    ], { windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] });
+    const child = this.#spawn(this.#executable, ['--pet-pid', String(this.#petPid)], {
+      windowsHide: true,
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
     this.#child = child;
 
     child.stdout.setEncoding('utf8');
@@ -115,6 +143,14 @@ export class WindowsHelper {
     child.stdin.on('error', () => {}); // writing to a dead helper: 'exit' handles the cleanup
     child.on('error', (err) => this.#onExit(child, null, err));
     child.on('exit', (code) => this.#onExit(child, code));
+
+    // After a restart, pick the event subscription back up.
+    if (this.#watching) {
+      const id = this.#nextId++;
+      const timer = setTimeout(() => this.#pending.delete(id), this.#timeoutMs);
+      this.#pending.set(id, { resolve() {}, reject() {}, timer });
+      child.stdin.write(`${JSON.stringify({ id, command: 'watch-foreground' })}\n`);
+    }
   }
 
   #onData(chunk) {
@@ -133,6 +169,11 @@ export class WindowsHelper {
       message = JSON.parse(line);
     } catch {
       this.#log.warn(`Windows helper sent something unexpected: ${line.slice(0, 200)}`);
+      return;
+    }
+
+    if ('event' in message) {
+      if (this.#watching) this.#onEvent?.(message.event, message.data);
       return;
     }
 
@@ -161,18 +202,30 @@ export class WindowsHelper {
     this.#child = null;
     clearTimeout(this.#idleTimer);
     if (!this.#ready && this.#unavailableReason === null) {
-      // Never got going (no PowerShell, blocked by policy...): don't keep retrying.
+      // Never got going: don't keep retrying.
       this.#unavailableReason = err ? err.message : `exited during startup (code ${code})`;
       this.#log.warn(`Windows helper unavailable: ${this.#unavailableReason}`);
     } else if (err || code) {
-      this.#log.warn(`Windows helper exited unexpectedly (${err ? err.message : `code ${code}`}); it will restart on the next request`);
+      this.#log.warn(`Windows helper exited unexpectedly (${err ? err.message : `code ${code}`}); it will restart when needed`);
     }
     this.#rejectAll(new Error('Windows helper exited'));
+
+    // Something is waiting for events: bring it back, unless it keeps crashing.
+    if (!this.#watching || !this.available) return;
+    const now = Date.now();
+    this.#restarts = this.#restarts.filter((time) => now - time < 60_000);
+    if (this.#restarts.length >= MAX_RESTARTS_PER_MINUTE) {
+      this.#unavailableReason = 'kept crashing';
+      this.#log.error('Windows helper keeps crashing; giving up until the app restarts');
+      return;
+    }
+    this.#restarts.push(now);
+    this.#ensureStarted();
   }
 
   #scheduleIdleStop() {
     clearTimeout(this.#idleTimer);
-    if (this.#pending.size > 0 || !this.#child) return;
+    if (this.#pending.size > 0 || !this.#child || this.#watching) return;
     this.#idleTimer = setTimeout(() => {
       this.#log.debug('Stopping idle Windows helper');
       this.stop();

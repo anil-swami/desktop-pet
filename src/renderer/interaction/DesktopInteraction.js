@@ -2,6 +2,7 @@
 //
 //   scan icons ─▶ pick a free one ─▶ walk to a take-off spot beside it
 //        ─▶ leap onto it (it becomes a one-way platform) ─▶ sit
+//        (already on an icon? leap straight across to the next one)
 //        ─▶ keep checking: still on it? still there, same place, not covered?
 //        ─▶ hop down when asked, or when the icon moves or a window covers it
 //           (if the icon is deleted, the platform simply vanishes and the pet falls)
@@ -13,6 +14,7 @@ export const DESKTOP_DEFAULTS = Object.freeze({
   takeoffOffset: 70,    // px beside the icon's centre where the leap starts
   surfaceInset: 0.15,   // share of the icon's width on each side that doesn't hold the pet
   hopDistance: 80,      // px sideways when hopping down
+  maxLeap: 700,         // px: farther icons are reached via the floor instead
   checkEveryMs: 1000,   // is the pet still standing on the icon?
   rescanEveryChecks: 5, // ...and every 5th check, is the icon unchanged and uncovered?
   headroom: 4,          // px the pet needs above its head (icons near the top are skipped)
@@ -61,9 +63,19 @@ export class DesktopInteraction {
     return scan.icons.filter((icon) => !icon.occluded && icon.y >= minTop);
   }
 
-  // Visit an icon by id, or 'random'. Resolves true once the pet sits on it.
+  // How many icons could be visited right now (not counting the one sat on).
+  async freeIconCount() {
+    const scan = await this.#getIcons();
+    const current = this.#visit?.icon.id;
+    return this.visitable(scan).filter((icon) => icon.id !== current).length;
+  }
+
+  // Visit an icon by id, or 'random' (never the one already sat on).
+  // Resolves true once the pet sits on it.
   async visit(target = 'random') {
-    const token = this.#abandon();
+    const from = this.#visit?.icon ?? null;
+    // Claim the turn, but keep watching the current icon until we actually move.
+    const token = ++this.#token;
     const scan = await this.#getIcons();
     if (token !== this.#token) return false;
 
@@ -72,32 +84,41 @@ export class DesktopInteraction {
       this.#log.info(`Can't visit an icon: ${problem}`);
       return false;
     }
-    const candidates = this.visitable(scan);
+    const candidates = this.visitable(scan).filter((candidate) => candidate.id !== from?.id);
     const icon = target === 'random'
       ? candidates[Math.floor(this.#random() * candidates.length)]
       : candidates.find((candidate) => candidate.id === target);
     if (!icon) {
       this.#log.info(target === 'random'
-        ? 'No icon is free to visit (covered by windows, or too close to the top)'
-        : 'That icon is covered, too close to the top, or gone');
+        ? 'No other icon is free to visit (covered by windows, or too close to the top)'
+        : 'That icon is covered, too close to the top, already sat on, or gone');
       return false;
     }
 
-    // Start from the floor: if on another icon, drop down first.
-    if (this.#character.standingOn !== null || !this.#character.grounded) {
-      this.#character.setSurfaces([]);
-      await this.#character.whenLanded();
-      if (token !== this.#token) return false;
-    }
-
+    this.#stopWatching();
     this.#log.info(`Visiting "${icon.name}" (${icon.kind})`);
     const centreX = icon.x + icon.width / 2;
-    const side = this.#character.position.x <= centreX ? -1 : 1;
-    if (!(await this.#character.moveTo(centreX + side * this.#options.takeoffOffset, { label: 'take-off spot' }))) return false;
-    if (token !== this.#token) return false;
+    const onFrom = from !== null && this.#character.standingOn === from.id;
 
-    this.#character.setSurfaces([this.#surfaceFor(icon)]);
-    await this.#character.jumpTo(centreX, icon.y);
+    if (onFrom && Math.abs(centreX - (from.x + from.width / 2)) <= this.#options.maxLeap) {
+      // Icon to icon: keep the old platform for take-off, drop it once airborne.
+      this.#character.setSurfaces([this.#surfaceFor(from), this.#surfaceFor(icon)]);
+      const landing = this.#character.jumpTo(centreX, icon.y);
+      this.#character.setSurfaces([this.#surfaceFor(icon)]);
+      await landing;
+    } else {
+      // Via the floor: drop down if needed, walk to a take-off spot, leap.
+      if (this.#character.standingOn !== null || !this.#character.grounded) {
+        this.#character.setSurfaces([]);
+        await this.#character.whenLanded();
+        if (token !== this.#token) return false;
+      }
+      const side = this.#character.position.x <= centreX ? -1 : 1;
+      if (!(await this.#character.moveTo(centreX + side * this.#options.takeoffOffset, { label: 'take-off spot' }))) return false;
+      if (token !== this.#token) return false;
+      this.#character.setSurfaces([this.#surfaceFor(icon)]);
+      await this.#character.jumpTo(centreX, icon.y);
+    }
     if (token !== this.#token) return false;
     if (this.#character.standingOn !== icon.id) {
       this.#log.info(`Missed "${icon.name}"`);
@@ -145,10 +166,15 @@ export class DesktopInteraction {
 
   #abandon() {
     this.#token += 1;
+    this.#stopWatching();
+    return this.#token;
+  }
+
+  // Forget the current visit (stop checking on it) without touching the platform.
+  #stopWatching() {
     this.#visit = null;
     this.#stopChecking?.();
     this.#stopChecking = null;
-    return this.#token;
   }
 
   // Only the middle of the icon holds the pet, so it visibly sits on the picture.

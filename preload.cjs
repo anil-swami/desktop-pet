@@ -17,15 +17,26 @@ const Channels = {
   LOG: 'pet:log',
   GET_CHARACTER: 'pet:get-character',
   GET_DESKTOP_ICONS: 'pet:get-desktop-icons',
+  GET_CONTEXT: 'pet:get-context',
   COMMAND: 'pet:command',
 };
 
+const text = (value, max) => (typeof value === 'string' ? value.slice(0, max) : null);
+const number = (value) => (Number.isFinite(value) ? value : null);
+
 contextBridge.exposeInMainWorld('desktopPet', {
   setClickThrough: (enabled) => ipcRenderer.send(Channels.SET_CLICK_THROUGH, enabled === true),
-  // `state` lets the menu show current settings (e.g. the mouse mode).
-  // Only known fields are copied, as plain strings.
+  // `state` lets the menu show current settings (mouse mode, what the pet is doing).
+  // Only known fields are copied, as plain values.
   showContextMenu: (state) => ipcRenderer.send(Channels.SHOW_CONTEXT_MENU, {
-    mouseMode: typeof state?.mouseMode === 'string' ? state.mouseMode : null,
+    mouseMode: text(state?.mouseMode, 20),
+    behavior: state?.behavior ? {
+      enabled: state.behavior.enabled === true,
+      state: text(state.behavior.state, 20),
+      activity: text(state.behavior.activity, 30),
+      mood: text(state.behavior.mood, 12),
+      energy: number(state.behavior.energy),
+    } : null,
   }),
   log: (level, message) => ipcRenderer.send(Channels.LOG, level, String(message)),
 
@@ -34,6 +45,9 @@ contextBridge.exposeInMainWorld('desktopPet', {
 
   // Request/response: desktop icon names, kinds and rectangles (no file paths).
   getDesktopIcons: () => ipcRenderer.invoke(Channels.GET_DESKTOP_ICONS),
+
+  // Request/response: the app in front and whether the user is away, right now.
+  getContext: () => ipcRenderer.invoke(Channels.GET_CONTEXT),
 
   // Subscribe to commands pushed by the main process. Returns an unsubscribe
   // function. Only the command object is passed on, never the IPC event

@@ -8,14 +8,17 @@ import { app, powerMonitor, screen } from 'electron';
 import { createLogger, logLevel } from './src/main/logger.js';
 import { WindowManager } from './src/main/WindowManager.js';
 import { DisplayManager, describeDisplay } from './src/main/DisplayManager.js';
-import { registerIpcHandlers } from './src/main/ipcHandlers.js';
+import { Channels, registerIpcHandlers } from './src/main/ipcHandlers.js';
 import { loadCharacter } from './src/main/CharacterLoader.js';
 import { WindowsHelper } from './src/main/WindowsHelper.js';
 import { DesktopIcons } from './src/main/DesktopIcons.js';
+import { AppAwareness } from './src/main/AppAwareness.js';
+import { UserPresence } from './src/main/UserPresence.js';
 
 const log = createLogger('main');
 const isDev = process.argv.includes('--dev');
 const CHARACTER_ID = 'default'; // becomes a setting in Phase 12
+const NOTICE_APPS = true;       // becomes a setting in Phase 12
 
 // A broken character pack must not stop the app: log it and let the renderer
 // show its fallback shape.
@@ -38,7 +41,7 @@ if (!app.requestSingleInstanceLock()) {
 } else {
   const windowManager = new WindowManager();
   const displayManager = new DisplayManager({ screen, powerMonitor, log: createLogger('display') });
-  // Read-only Windows shell queries (desktop icons). Starts on first use.
+  // Read-only Windows shell queries (desktop icons, foreground app). Starts on first use.
   // process.pid is passed so the helper ignores the pet's own window.
   const windowsHelper = new WindowsHelper({ petPid: process.pid, log: createLogger('helper') });
   const desktopIcons = new DesktopIcons({
@@ -48,10 +51,28 @@ if (!app.requestSingleInstanceLock()) {
     log: createLogger('desktop'),
   });
 
+  // Push events to the pet page (if it's there).
+  const sendToPet = (command) => {
+    const contents = windowManager.petWindow?.webContents;
+    if (contents && !contents.isLoading()) contents.send(Channels.COMMAND, command);
+  };
+  const appAwareness = new AppAwareness({
+    helper: windowsHelper,
+    onChange: (app) => sendToPet({ type: 'app-changed', app }),
+    log: createLogger('apps'),
+  });
+  const userPresence = new UserPresence({
+    powerMonitor,
+    onChange: (away) => sendToPet({ type: 'user-away', away }),
+    log: createLogger('presence'),
+  });
+
   app.whenReady().then(() => {
     log.info(`Starting Desktop Pet ${app.getVersion()} (Electron ${process.versions.electron}, log level: ${logLevel})`);
     const character = loadCharacterSafely(CHARACTER_ID);
-    registerIpcHandlers({ windowManager, getCharacter: () => character, desktopIcons, isDev });
+    registerIpcHandlers({ windowManager, getCharacter: () => character, desktopIcons, appAwareness, userPresence, isDev });
+    userPresence.start();
+    appAwareness.setEnabled(NOTICE_APPS);
 
     // Keep the pet window fitted to the screen's work area as it changes.
     const display = displayManager.start((next) => windowManager.fitTo(next.workArea));
@@ -63,6 +84,8 @@ if (!app.requestSingleInstanceLock()) {
   app.on('window-all-closed', () => app.quit());
   app.on('will-quit', () => {
     displayManager.stop();
+    userPresence.stop();
+    appAwareness.stop();
     windowsHelper.stop();
     log.info('Shutting down');
   });

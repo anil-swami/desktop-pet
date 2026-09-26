@@ -25,10 +25,25 @@ export const Channels = Object.freeze({
   LOG: 'pet:log',
   GET_CHARACTER: 'pet:get-character',
   GET_DESKTOP_ICONS: 'pet:get-desktop-icons',
+  GET_CONTEXT: 'pet:get-context',
   COMMAND: 'pet:command',
 });
 
-export function registerIpcHandlers({ windowManager, getCharacter, desktopIcons, isDev }) {
+const STATE_PATTERN = /^[A-Z_]{1,20}$/;
+
+// What the renderer says the pet is doing, checked field by field (menu display only).
+function behaviorSummary(raw) {
+  if (!raw || typeof raw !== 'object') return null;
+  return {
+    enabled: raw.enabled === true,
+    state: typeof raw.state === 'string' && STATE_PATTERN.test(raw.state) ? raw.state : null,
+    activity: typeof raw.activity === 'string' ? raw.activity.replace(/[^a-z-]/g, '').slice(0, 30) : null,
+    mood: typeof raw.mood === 'string' ? raw.mood.replace(/[^a-z]/g, '').slice(0, 12) : null,
+    energy: Number.isFinite(raw.energy) ? Math.round(Math.min(100, Math.max(0, raw.energy))) : null,
+  };
+}
+
+export function registerIpcHandlers({ windowManager, getCharacter, desktopIcons, appAwareness, userPresence, isDev }) {
   const fromPet = (event) => {
     if (windowManager.isPetWebContents(event.sender)) return true;
     log.warn('Ignored IPC from unknown sender');
@@ -56,8 +71,14 @@ export function registerIpcHandlers({ windowManager, getCharacter, desktopIcons,
       character: getCharacter(),
       isDev,
       mouseMode,
+      behavior: behaviorSummary(state?.behavior),
+      appAwareness: { enabled: appAwareness.enabled, available: appAwareness.available },
       desktopIcons: icons,
       sendCommand,
+      setNoticeApps: (enabled) => {
+        appAwareness.setEnabled(enabled);
+        if (!enabled) sendCommand({ type: 'app-changed', app: null });
+      },
       openDevTools: () => windowManager.openDevTools(),
     });
     menu.popup({ window: windowManager.petWindow });
@@ -73,4 +94,9 @@ export function registerIpcHandlers({ windowManager, getCharacter, desktopIcons,
 
   // Fresh desktop icon scan: names, kinds and rectangles in window coordinates.
   ipcMain.handle(Channels.GET_DESKTOP_ICONS, (event) => (fromPet(event) ? desktopIcons.scan() : null));
+
+  // The situation right now, for a renderer that just started (events it missed).
+  ipcMain.handle(Channels.GET_CONTEXT, (event) => (fromPet(event)
+    ? { app: appAwareness.current, userAway: userPresence.away }
+    : null));
 }

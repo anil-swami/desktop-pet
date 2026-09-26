@@ -11,7 +11,7 @@ afterEach(() => {
 // For requests a test starts but doesn't await (stop() rejects them).
 const ignore = (promise) => promise.catch(() => {});
 
-// A stand-in for the PowerShell child process.
+// A stand-in for the helper child process.
 function fakeChild() {
   const child = new EventEmitter();
   child.written = [];
@@ -24,6 +24,7 @@ function fakeChild() {
   child.stderr = Object.assign(new EventEmitter(), { setEncoding() {} });
   child.kill = () => { child.killed = true; };
   child.send = (message) => child.stdout.emit('data', `${JSON.stringify(message)}\n`);
+  child.answer = (index, result) => child.send({ id: child.written[index].id, ok: true, result });
   return child;
 }
 
@@ -33,6 +34,7 @@ function setup(options = {}) {
   const helper = new WindowsHelper({
     petPid: 1234,
     platform: 'win32',
+    exists: () => true,
     spawn: (command, args, spawnOptions) => {
       spawnCalls.push({ command, args, spawnOptions });
       const child = fakeChild();
@@ -45,15 +47,14 @@ function setup(options = {}) {
   return { helper, children, spawnCalls };
 }
 
-describe('WindowsHelper', () => {
-  test('starts PowerShell on first request, hidden, with the pet pid', () => {
+describe('WindowsHelper: requests', () => {
+  test('starts the helper exe on first request, hidden, with the pet pid', () => {
     const { helper, spawnCalls } = setup();
     assert.equal(helper.running, false);
     ignore(helper.request('ping'));
     assert.equal(spawnCalls.length, 1);
-    assert.match(spawnCalls[0].command, /powershell\.exe$/i);
-    assert.ok(spawnCalls[0].args.includes('-NonInteractive'));
-    assert.deepEqual(spawnCalls[0].args.slice(-2), ['-PetPid', '1234']);
+    assert.match(spawnCalls[0].command, /windows-helper\.exe$/);
+    assert.deepEqual(spawnCalls[0].args, ['--pet-pid', '1234']);
     assert.equal(spawnCalls[0].spawnOptions.windowsHide, true);
   });
 
@@ -85,6 +86,24 @@ describe('WindowsHelper', () => {
     assert.equal(spawnCalls.length, 0);
   });
 
+  test('times out a request that gets no answer', async () => {
+    const { helper } = setup({ timeoutMs: 10 });
+    await assert.rejects(helper.request('ping'), /timed out/);
+  });
+
+  test('stops itself after being idle', async () => {
+    const { helper, children } = setup({ idleMs: 10 });
+    const request = helper.request('ping');
+    children[0].send({ ready: true });
+    children[0].answer(0, 'pong');
+    await request;
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    assert.equal(helper.running, false);
+    assert.equal(children[0].killed, true);
+  });
+});
+
+describe('WindowsHelper: failures', () => {
   test('a crash rejects pending requests; the next request restarts it', async () => {
     const { helper, children } = setup();
     const request = helper.request('ping');
@@ -96,45 +115,92 @@ describe('WindowsHelper', () => {
     assert.equal(children.length, 2);
   });
 
-  test('if it never starts, the feature is marked unavailable (no retry loop)', async () => {
+  test('if it never starts, it is marked unavailable (no retry loop)', async () => {
     const { helper, children } = setup();
     const request = helper.request('ping');
-    children[0].send({ ready: false, error: 'Cannot add type. Compilation is not allowed.' });
+    children[0].send({ ready: false, error: 'blocked by policy' });
     children[0].emit('exit', 1);
     await assert.rejects(request);
     assert.equal(helper.available, false);
-    assert.match(helper.unavailableReason, /Compilation is not allowed/);
+    assert.match(helper.unavailableReason, /blocked by policy/);
     await assert.rejects(helper.request('ping'), /unavailable/);
     assert.equal(children.length, 1);
   });
 
-  test('a missing PowerShell is reported as unavailable', async () => {
+  test('a helper that cannot be launched is reported as unavailable', async () => {
     const { helper, children } = setup();
     const request = helper.request('ping');
-    children[0].emit('error', new Error('spawn powershell.exe ENOENT'));
+    children[0].emit('error', new Error('spawn windows-helper.exe ENOENT'));
     await assert.rejects(request);
     assert.match(helper.unavailableReason, /ENOENT/);
   });
 
-  test('times out a request that gets no answer', async () => {
-    const { helper } = setup({ timeoutMs: 10 });
-    await assert.rejects(helper.request('ping'), /timed out/);
-  });
-
-  test('stops itself after being idle', async () => {
-    const { helper, children } = setup({ idleMs: 10 });
-    const request = helper.request('ping');
-    children[0].send({ ready: true });
-    children[0].send({ id: children[0].written[0].id, ok: true, result: 'pong' });
-    await request;
-    await new Promise((resolve) => setTimeout(resolve, 30));
-    assert.equal(helper.running, false);
-    assert.equal(children[0].killed, true);
+  test('says so when the helper has not been built', async () => {
+    const { helper } = setup({ exists: () => false });
+    assert.equal(helper.available, false);
+    assert.match(helper.unavailableReason, /not built/);
   });
 
   test('is unavailable on other operating systems', async () => {
     const { helper } = setup({ platform: 'linux' });
     assert.equal(helper.available, false);
     await assert.rejects(helper.request('ping'), /only available on Windows/);
+  });
+});
+
+describe('WindowsHelper: foreground events', () => {
+  test('passes event lines to the watcher', async () => {
+    const { helper, children } = setup();
+    const events = [];
+    const watching = helper.watch((name, data) => events.push({ name, data }));
+    const [child] = children;
+    assert.equal(child.written[0].command, 'watch-foreground');
+    child.send({ ready: true });
+    child.answer(0, 'ok');
+    await watching;
+    child.send({ event: 'foreground', data: { kind: 'app', process: 'Code.exe' } });
+    assert.deepEqual(events, [{ name: 'foreground', data: { kind: 'app', process: 'Code.exe' } }]);
+  });
+
+  test('stays running while watching, even when otherwise idle', async () => {
+    const { helper, children } = setup({ idleMs: 10 });
+    const watching = helper.watch(() => {});
+    children[0].send({ ready: true });
+    children[0].answer(0, 'ok');
+    await watching;
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    assert.equal(helper.running, true);
+  });
+
+  test('restarts and re-subscribes after a crash while watching', async () => {
+    const { helper, children } = setup();
+    ignore(helper.watch(() => {}));
+    children[0].send({ ready: true });
+    children[0].emit('exit', 3);
+    assert.equal(children.length, 2);
+    assert.equal(children[1].written[0].command, 'watch-foreground');
+  });
+
+  test('gives up when it keeps crashing', () => {
+    const { helper, children } = setup();
+    ignore(helper.watch(() => {}));
+    for (let i = 0; i < 4; i += 1) {
+      children.at(-1).send({ ready: true });
+      children.at(-1).emit('exit', 3);
+    }
+    assert.equal(helper.available, false);
+    assert.match(helper.unavailableReason, /kept crashing/);
+    assert.equal(children.length, 4); // the first start + 3 restarts
+  });
+
+  test('unwatch stops the events', async () => {
+    const { helper, children } = setup();
+    const events = [];
+    ignore(helper.watch((name) => events.push(name)));
+    children[0].send({ ready: true });
+    ignore(helper.unwatch());
+    children[0].send({ event: 'foreground', data: {} });
+    assert.equal(events.length, 0);
+    assert.equal(children[0].written.at(-1).command, 'unwatch-foreground');
   });
 });
