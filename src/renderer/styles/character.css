@@ -1,12 +1,12 @@
-/* Phase 2: still parked at the bottom centre, standing on the taskbar.
-   Size comes from the character's manifest via CharacterView. */
+/* Anchored at the top-left; CharacterView moves it with a transform
+   (GPU-composited, no layout). Size comes from the character's manifest. */
 .pet {
   position: absolute;
-  bottom: 0;
-  left: 50%;
+  top: 0;
+  left: 0;
   width: var(--pet-width, 96px);
   height: var(--pet-height, 96px);
-  transform: translateX(-50%);
+  will-change: transform;
   cursor: grab;
 }
 

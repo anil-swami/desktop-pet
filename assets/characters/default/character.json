@@ -19,7 +19,7 @@
         { "src": "idle.svg", "ms": 200 }
       ]
     },
-    "jump":      { "frames": [{ "src": "sit.svg", "ms": 120 }, { "src": "jump.svg", "ms": 480 }] },
+    "jump":      { "frames": ["jump.svg"] },
     "fall":      { "frames": ["fall.svg"], "motion": "flail" },
     "happy":     { "frames": [{ "src": "happy.svg", "ms": 900 }], "motion": "hop" },
     "surprised": { "frames": [{ "src": "surprised.svg", "ms": 900 }], "motion": "jolt" },

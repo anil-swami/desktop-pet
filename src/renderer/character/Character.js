@@ -3,14 +3,15 @@
 //   Character
 //    ├── Animation  -> AnimationController (what is playing, frame timing)
 //    ├── Direction  -> left / right (art is mirrored for the other side)
-//    ├── Position   -> Phase 3 (MovementController)
-//    └── Behavior   -> Phase 8 (state machine decides what to play)
+//    ├── Position   -> MovementController (walk, run, jump, gravity)
+//    └── Behavior   -> Phase 8 (state machine decides what to do)
 //
 // For now the current animation doubles as the pet's "state". Small life
 // details that belong to the character itself, like blinking while idle,
 // live here rather than in the behavior engine.
 
 import { AnimationController } from './AnimationController.js';
+import { MovementController } from './MovementController.js';
 
 const BLINK_DELAY_MS = { min: 2500, max: 6500 };
 const silentLog = { debug() {}, info() {}, warn() {}, error() {} };
@@ -18,13 +19,15 @@ const silentLog = { debug() {}, info() {}, warn() {}, error() {} };
 export class Character {
   #animations;
   #controller;
+  #movement;
   #ticker;
   #log;
   #random;
   #cancelBlink = null;
   #previous = null;
 
-  constructor({ data, view, ticker, log = silentLog, random = Math.random }) {
+  // area: { width, height } of the space the pet lives in (the pet window).
+  constructor({ data, view, ticker, area, log = silentLog, random = Math.random, movementOptions }) {
     this.name = data.name;
     this.#animations = data.animations;
     this.#ticker = ticker;
@@ -36,6 +39,17 @@ export class Character {
       view,
       ticker,
       onChange: (name) => this.#onAnimationChange(name),
+    });
+    // The Character itself is the movement's "animator": movement calls
+    // play()/face() and reads `direction`, so there is one source of truth.
+    this.#movement = new MovementController({
+      animator: this,
+      view,
+      ticker,
+      area,
+      size: { width: data.width, height: data.height },
+      log,
+      options: movementOptions,
     });
   }
 
@@ -51,6 +65,16 @@ export class Character {
     return Object.keys(this.#animations);
   }
 
+  get position() {
+    return this.#movement.position;
+  }
+
+  get isMoving() {
+    return this.#movement.isMoving;
+  }
+
+  // --- Animation -------------------------------------------------------------
+
   play(name, options) {
     if (!this.#controller.has(name)) {
       this.#log.warn(`Unknown animation "${name}"`);
@@ -63,12 +87,43 @@ export class Character {
     if (this.#controller.setDirection(direction)) this.#log.debug(`Direction: ${direction}`);
   }
 
+  // --- Movement (see MovementController) --------------------------------------
+
+  walk(direction = this.direction) {
+    this.#movement.walk(direction);
+  }
+
+  run(direction = this.direction) {
+    this.#movement.run(direction);
+  }
+
+  stop() {
+    this.#movement.stop();
+  }
+
   turnAround() {
-    this.face(this.direction === 'left' ? 'right' : 'left');
+    this.#movement.turnAround();
+  }
+
+  moveTo(x, options) {
+    return this.#movement.moveTo(x, options);
+  }
+
+  jump() {
+    return this.#movement.jump();
+  }
+
+  placeAt(x, y) {
+    this.#movement.placeAt(x, y);
+  }
+
+  setArea(area) {
+    this.#movement.setArea(area);
   }
 
   dispose() {
     this.#cancelBlink?.();
+    this.#movement.dispose();
     this.#controller.dispose();
   }
 

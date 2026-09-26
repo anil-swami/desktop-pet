@@ -25,9 +25,26 @@ export function fakeView() {
   return {
     frames: [],
     animations: [],
+    positions: [],
     setAnimation(name, motion) { this.animations.push({ name, motion }); },
     showFrame(src, mirrored) { this.frames.push({ src, mirrored }); },
+    setPosition(x, y) { this.positions.push({ x, y }); },
     get last() { return this.frames.at(-1); },
+  };
+}
+
+// Stands in for the Character when testing MovementController on its own.
+export function fakeAnimator(direction = 'right') {
+  return {
+    direction,
+    animation: null,
+    played: [],
+    play(name) {
+      this.animation = name;
+      this.played.push(name);
+      return Promise.resolve(true);
+    },
+    face(next) { this.direction = next; },
   };
 }
 

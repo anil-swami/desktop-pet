@@ -2,7 +2,7 @@
 
 A tiny cartoon creature that lives on your Windows desktop. Built with Electron and vanilla JavaScript.
 
-> **Status:** Phase 2 — a data-driven animation system with 12 animations. Pip still stands in one place on the taskbar; walking arrives in Phase 3.
+> **Status:** Phase 3 — Pip walks, runs, jumps with gravity and moves to targets along the taskbar. It only moves when told to (dev menu); autonomous behavior arrives in Phases 8–9.
 
 ## Requirements
 
@@ -23,7 +23,7 @@ npm run dev        # debug logging + developer items in the right-click menu
 npm test           # unit tests (Node's built-in test runner, no extra dependencies)
 ```
 
-In dev mode, right-click the pet for **Play animation**, **Play all animations**, **Turn around** and **Open DevTools**.
+In dev mode, right-click the pet for **Movement** (walk, run, stop, jump, turn around, drop from the top, walk/run to a spot, movement demo), **Play animation**, **Play all animations** and **Open DevTools**.
 
 Set the log level explicitly with `PET_LOG_LEVEL` (`debug`, `info`, `warn`, `error`, `silent`):
 
@@ -56,10 +56,13 @@ desktop-pet/
 │       │   ├── Ticker.js            The single animation loop + timer registry
 │       │   └── logger.js            Forwards renderer logs to the terminal
 │       ├── character/
-│       │   ├── Character.js         The pet as the app sees it (animation, direction, blinking)
+│       │   ├── Character.js         The pet as the app sees it (animation, movement, blinking)
 │       │   ├── AnimationController.js  Which frame to show, and when (no DOM)
+│       │   ├── MovementController.js   Position, walking, running, jumping, gravity (no DOM)
 │       │   └── CharacterView.js     The only DOM code for the pet
-│       ├── dev/showcase.js      "Play all animations" helper
+│       ├── interaction/
+│       │   └── ClickThrough.js      Clickable pet, click-through everywhere else
+│       ├── dev/demos.js         "Play all animations" and "Movement demo"
 │       ├── index.html
 │       └── styles/              main.css (page), character.css (pet + motions)
 ├── assets/characters/default/   Pip: character.json + 13 SVG frames
@@ -105,6 +108,7 @@ Click-through works like this:
 2. When the cursor moves onto the pet, the page asks main to accept clicks.
 3. When it moves off, clicks pass through again.
 4. IPC is only sent when the state flips, not on every mouse move.
+5. The pet can walk out from under a still cursor, and no mouse event fires then. So while the cursor is over the pet, `ClickThrough` re-checks each frame what is under it.
 
 If the page crashes or hangs while accepting clicks, the main process restores click-through so the invisible window can never block your desktop.
 
@@ -123,6 +127,35 @@ Ticker (rAF loop) ──dt──▶ AnimationController ──"show frame X"─�
 - **Ticker** is the single `requestAnimationFrame` loop. It **stops entirely** when nothing is animating: a still idle pose costs zero JavaScript per frame.
 - **Motions** (`breathe`, `bob`, `hop`...) are CSS keyframes layered on top of frames. They run on the GPU compositor.
 - **Blinking** is scheduled by `Character` while idle, every 2.5–6.5 seconds.
+
+### Movement
+
+`MovementController` owns the pet's position. It never moves an Electron window: the pet element gets a CSS `translate3d`, which the GPU composites without layout.
+
+- **Coordinates** are CSS pixels inside the pet window. `x` is the pet's horizontal centre and `y` is where its feet are. The window covers the work area, so the **ground is the window's bottom edge**: the top of the taskbar.
+- **Bounds:** the pet stops at the screen edges, and every target is clamped to the visible area.
+- **Physics** per frame: `velocity += gravity × dt`, then `position += velocity × dt`.
+- **Animations follow movement transitions:** start walking → `walk`, jump → `jump`, airborne without jumping → `fall`, land/arrive/stop → `idle`.
+- **The Ticker only runs while the pet moves.** Standing still costs no JavaScript per frame.
+
+```js
+pet.walk('left');                  // until stop() or the edge
+pet.run('right');
+pet.stop();
+pet.turnAround();
+await pet.moveTo(900, { run: true });  // true on arrival, false if interrupted
+await pet.jump();                  // true on landing
+pet.placeAt(400, 0);               // teleport; above the ground it falls
+```
+
+| Setting | Default | In `MOVEMENT_DEFAULTS` |
+|---|---|---|
+| Walk speed | 60 px/s | `walkSpeed` |
+| Run speed | 190 px/s | `runSpeed` |
+| Gravity | 2400 px/s² | `gravity` |
+| Jump speed | 600 px/s (≈ 75 px high) | `jumpSpeed` |
+
+These become user settings in Phase 12.
 
 ## Adding a character
 
@@ -192,7 +225,7 @@ Invalid frames (missing file, wrong type, or a path outside the folder) are skip
 
 1. ✅ Basic desktop pet: transparent frameless window
 2. ✅ Character animation system
-3. Desktop movement
+3. ✅ Desktop movement
 4. Multi-monitor support
 5. Mouse interaction
 6. Desktop icons and folders

@@ -8,9 +8,10 @@ function setup(animations = TEST_ANIMATIONS) {
   const warnings = [];
   const log = { debug() {}, info() {}, warn: (m) => warnings.push(m), error() {} };
   const character = new Character({
-    data: { name: 'Test', facing: 'right', animations },
+    data: { name: 'Test', facing: 'right', width: 100, height: 100, animations },
     view: fakeView(),
     ticker,
+    area: { width: 1000, height: 600 },
     log,
     random: () => 0.5,
   });
@@ -42,6 +43,19 @@ describe('Character', () => {
     const { character, ticker } = setup({ ...TEST_ANIMATIONS, blink: { ...TEST_ANIMATIONS.blink, aliasOf: 'idle' } });
     character.play('idle');
     assert.equal(ticker.timers.length, 0);
+  });
+
+  test('movement drives the matching animations', () => {
+    const { character, ticker } = setup();
+    character.placeAt(500);
+    assert.equal(character.animation, 'idle');
+    character.walk('left');
+    assert.equal(character.animation, 'walk');
+    assert.equal(character.direction, 'left');
+    ticker.tick(1000);
+    assert.ok(character.position.x < 500);
+    character.stop();
+    assert.equal(character.animation, 'idle');
   });
 
   test('turnAround flips direction', () => {
