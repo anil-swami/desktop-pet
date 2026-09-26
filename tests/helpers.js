@@ -54,6 +54,13 @@ export const TEST_ANIMATIONS = {
   idle: { frames: [frame('idle')], loop: true, next: null, motion: 'breathe', aliasOf: null },
   blink: { frames: [frame('blink', 140)], loop: false, next: 'idle', motion: 'breathe', aliasOf: null },
   walk: { frames: [frame('w1'), frame('w2'), frame('w3')], loop: true, next: null, motion: 'bob', aliasOf: null },
+  run: { frames: [frame('r1'), frame('r2')], loop: true, next: null, motion: 'bounce', aliasOf: null },
   happy: { frames: [frame('h1'), frame('h2')], loop: false, next: 'idle', motion: null, aliasOf: null },
   jump: { frames: [frame('j1'), frame('j2')], loop: false, next: null, motion: null, aliasOf: null },
+  fall: { frames: [frame('f1')], loop: true, next: null, motion: 'flail', aliasOf: null },
+  surprised: { frames: [frame('s1', 200)], loop: false, next: 'idle', motion: 'jolt', aliasOf: null },
+  confused: { frames: [frame('c1', 200)], loop: false, next: 'idle', motion: 'tilt', aliasOf: null },
 };
+
+// Let pending promise callbacks (e.g. "after the reaction, resume walking") run.
+export const flush = () => new Promise((resolve) => setImmediate(resolve));

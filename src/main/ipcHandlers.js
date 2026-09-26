@@ -12,7 +12,7 @@
 
 import { ipcMain } from 'electron';
 import { createLogger, isLogLevel } from './logger.js';
-import { buildPetMenu } from './contextMenu.js';
+import { buildPetMenu, MOUSE_MODE_ITEMS } from './contextMenu.js';
 
 const log = createLogger('ipc');
 const rendererLog = createLogger('renderer');
@@ -38,14 +38,16 @@ export function registerIpcHandlers({ windowManager, getCharacter, isDev }) {
     windowManager.setClickThrough(enabled);
   });
 
-  ipcMain.on(Channels.SHOW_CONTEXT_MENU, (event) => {
+  ipcMain.on(Channels.SHOW_CONTEXT_MENU, (event, state) => {
     if (!fromPet(event)) return;
     const sendCommand = (command) => {
       if (!event.sender.isDestroyed()) event.sender.send(Channels.COMMAND, command);
     };
+    const mouseMode = MOUSE_MODE_ITEMS.some(([, mode]) => mode === state?.mouseMode) ? state.mouseMode : null;
     const menu = buildPetMenu({
       character: getCharacter(),
       isDev,
+      mouseMode,
       sendCommand,
       openDevTools: () => windowManager.openDevTools(),
     });

@@ -29,6 +29,7 @@ export class Character {
   // area: { width, height } of the space the pet lives in (the pet window).
   constructor({ data, view, ticker, area, log = silentLog, random = Math.random, movementOptions }) {
     this.name = data.name;
+    this.size = Object.freeze({ width: data.width, height: data.height });
     this.#animations = data.animations;
     this.#ticker = ticker;
     this.#log = log;
@@ -71,6 +72,31 @@ export class Character {
 
   get isMoving() {
     return this.#movement.isMoving;
+  }
+
+  // Movement state: 'idle' | 'walk' | 'run'.
+  get mode() {
+    return this.#movement.mode;
+  }
+
+  get grounded() {
+    return this.#movement.grounded;
+  }
+
+  get held() {
+    return this.#movement.held;
+  }
+
+  get hasTarget() {
+    return this.#movement.hasTarget;
+  }
+
+  get walkableRange() {
+    return this.#movement.walkableRange;
+  }
+
+  get lastFallHeight() {
+    return this.#movement.lastFallHeight;
   }
 
   // --- Animation -------------------------------------------------------------
@@ -119,6 +145,18 @@ export class Character {
 
   setArea(area) {
     this.#movement.setArea(area);
+  }
+
+  grab() {
+    this.#movement.grab();
+  }
+
+  dragTo(x, y) {
+    this.#movement.dragTo(x, y);
+  }
+
+  release(velocity) {
+    return this.#movement.release(velocity);
   }
 
   dispose() {

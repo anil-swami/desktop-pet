@@ -10,6 +10,12 @@
   cursor: grab;
 }
 
+/* While dragging, the whole window holds the mouse, so set the cursor everywhere. */
+body.is-dragging,
+body.is-dragging .pet {
+  cursor: grabbing;
+}
+
 .pet__facing {
   width: 100%;
   height: 100%;

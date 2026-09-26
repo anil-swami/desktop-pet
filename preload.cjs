@@ -21,7 +21,11 @@ const Channels = {
 
 contextBridge.exposeInMainWorld('desktopPet', {
   setClickThrough: (enabled) => ipcRenderer.send(Channels.SET_CLICK_THROUGH, enabled === true),
-  showContextMenu: () => ipcRenderer.send(Channels.SHOW_CONTEXT_MENU),
+  // `state` lets the menu show current settings (e.g. the mouse mode).
+  // Only known fields are copied, as plain strings.
+  showContextMenu: (state) => ipcRenderer.send(Channels.SHOW_CONTEXT_MENU, {
+    mouseMode: typeof state?.mouseMode === 'string' ? state.mouseMode : null,
+  }),
   log: (level, message) => ipcRenderer.send(Channels.LOG, level, String(message)),
 
   // Request/response: resolves with the validated character data (or null).

@@ -7,6 +7,7 @@ import { createLogger } from './core/logger.js';
 import { Character } from './character/Character.js';
 import { CharacterView } from './character/CharacterView.js';
 import { ClickThrough } from './interaction/ClickThrough.js';
+import { MouseInteraction } from './interaction/MouseInteraction.js';
 import { playMovementDemo, playShowcase, stopDemos } from './dev/demos.js';
 
 const api = window.desktopPet;
@@ -14,13 +15,14 @@ const log = createLogger('app');
 const pet = document.getElementById('pet');
 const view = new CharacterView(pet);
 const ticker = new Ticker();
+const clickThrough = new ClickThrough({ target: pet, api, ticker });
 let character = null;
+let mouse = null;
 
-new ClickThrough({ target: pet, api, ticker });
-
+// The menu shows the current mouse mode, so send it along.
 pet.addEventListener('contextmenu', (event) => {
   event.preventDefault();
-  api?.showContextMenu();
+  api?.showContextMenu({ mouseMode: mouse?.mode });
 });
 
 // The pet window covers the work area, so its size is the space the pet can use.
@@ -49,11 +51,18 @@ function spotX(name) {
   return Object.hasOwn(SPOTS, name) ? SPOTS[name] * width : null;
 }
 
+// A direct movement order overrides "follow the mouse".
+const MOVEMENT_COMMANDS = new Set(['walk', 'run', 'stop', 'move-to', 'movement-demo']);
+
 function handleCommand(command) {
   if (!character || typeof command?.type !== 'string') return;
   stopDemos();
+  if (mouse?.mode === 'follow' && MOVEMENT_COMMANDS.has(command.type)) mouse.setMode('curious');
 
   switch (command.type) {
+    case 'mouse-mode':
+      mouse?.setMode(command.mode);
+      break;
     case 'play-animation':
       if (typeof command.name !== 'string') break;
       character.stop();
@@ -130,12 +139,23 @@ async function start() {
   const area = currentArea();
   character = new Character({ data, view, ticker, area, log: createLogger('character') });
   character.placeAt(area.width / 2); // bottom centre, standing on the taskbar
+
+  mouse = new MouseInteraction({
+    character,
+    ticker,
+    log: createLogger('mouse'),
+    holdPointer: () => clickThrough.hold(),
+    onDragChange: (dragging) => document.body.classList.toggle('is-dragging', dragging),
+    onInteract: stopDemos,
+  });
+  mouse.attach(pet);
   api.onCommand(handleCommand);
   log.info(`Character "${data.name}" ready (${character.animationNames.length} animations), area ${area.width}x${area.height}`);
 }
 
 // Stop the loop and all timers if the page is ever torn down.
 window.addEventListener('beforeunload', () => {
+  mouse?.dispose();
   character?.dispose();
   ticker.dispose();
 });

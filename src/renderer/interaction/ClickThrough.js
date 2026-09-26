@@ -9,12 +9,17 @@
 // mousemove fires then, and the empty spot would keep swallowing clicks. So
 // while the cursor is over the pet, we re-check each frame what is under the
 // last known cursor position.
+//
+// hold() keeps the window accepting the mouse regardless of hover, e.g. while
+// the pet is being dragged and the cursor races ahead of it.
 
 export class ClickThrough {
   #target;
   #api;
   #ticker;
   #over = false;
+  #holds = 0;
+  #interactive = false;
   #pointer = null;
   #stopWatching = null;
 
@@ -34,17 +39,37 @@ export class ClickThrough {
     window.addEventListener('blur', () => this.#setOver(false));
   }
 
+  // Returns a release function (safe to call more than once).
+  hold() {
+    this.#holds += 1;
+    this.#apply();
+    let released = false;
+    return () => {
+      if (released) return;
+      released = true;
+      this.#holds -= 1;
+      this.#recheck();
+      this.#apply();
+    };
+  }
+
   #setOver(over) {
     if (over === this.#over) return;
     this.#over = over;
-    this.#api?.setClickThrough(!over);
-
     if (over) {
       this.#stopWatching = this.#ticker.add(this.#recheck);
     } else {
       this.#stopWatching?.();
       this.#stopWatching = null;
     }
+    this.#apply();
+  }
+
+  #apply() {
+    const interactive = this.#over || this.#holds > 0;
+    if (interactive === this.#interactive) return;
+    this.#interactive = interactive;
+    this.#api?.setClickThrough(!interactive);
   }
 
   #recheck = () => {

@@ -186,6 +186,66 @@ describe('MovementController', () => {
     assert.equal(movement.position.y, 800);
   });
 
+  test('grabbing stops everything and holds the pet without ticking', async () => {
+    const { movement, animator, ticker } = setup();
+    const trip = movement.moveTo(900);
+    movement.grab();
+    assert.equal(await trip, false);
+    assert.equal(movement.held, true);
+    assert.equal(movement.mode, 'idle');
+    assert.equal(animator.animation, 'fall');
+    assert.equal(ticker.listeners.size, 0);
+    movement.walk('left');
+    assert.equal(movement.mode, 'idle');
+    assert.equal(await movement.jump(), false);
+  });
+
+  test('a held pet follows dragTo, kept fully on screen', () => {
+    const { movement } = setup();
+    movement.grab();
+    movement.dragTo(300, 250);
+    assert.deepEqual(movement.position, { x: 300, y: 250 });
+    movement.dragTo(-100, 10);
+    assert.deepEqual(movement.position, { x: 50, y: 100 }); // top of a 100px-tall pet at y=0
+    movement.dragTo(2000, 5000);
+    assert.deepEqual(movement.position, { x: 950, y: 600 });
+  });
+
+  test('released in the air, the pet falls, lands and reports the fall height', async () => {
+    const { movement, animator, ticker } = setup();
+    movement.grab();
+    movement.dragTo(500, 300);
+    const landed = movement.release();
+    assert.equal(animator.animation, 'fall');
+    runUntil(ticker, () => movement.grounded);
+    assert.equal(await landed, true);
+    assert.equal(movement.position.y, 600);
+    assert.equal(movement.lastFallHeight, 300);
+    assert.equal(animator.animation, 'idle');
+  });
+
+  test('released on the ground, the pet simply stands', async () => {
+    const { movement, animator } = setup();
+    movement.grab();
+    assert.equal(await movement.release(), true);
+    assert.equal(movement.grounded, true);
+    assert.equal(animator.animation, 'idle');
+  });
+
+  test('a thrown pet flies sideways and bounces off the screen edge', () => {
+    const { movement, animator, ticker } = setup();
+    movement.grab();
+    movement.dragTo(850, 200);
+    movement.release({ vx: 1000, vy: -200 });
+    assert.equal(animator.direction, 'right');
+    ticker.tick(16);
+    assert.ok(movement.position.x > 850);
+    runUntil(ticker, () => animator.direction === 'left');
+    assert.equal(animator.direction, 'left'); // bounced
+    runUntil(ticker, () => movement.grounded);
+    assert.ok(movement.position.x < 950);
+  });
+
   test('renders every position change to the view', () => {
     const { movement, view, ticker } = setup();
     const before = view.positions.length;

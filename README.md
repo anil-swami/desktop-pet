@@ -2,7 +2,7 @@
 
 A tiny cartoon creature that lives on your Windows desktop. Built with Electron and vanilla JavaScript.
 
-> **Status:** Phase 4 — Pip walks, runs and jumps along the taskbar, and stays fitted to the screen when resolution, scaling or the taskbar change. It only moves when told to (dev menu); autonomous behavior arrives in Phases 8–9.
+> **Status:** Phase 5 — Pip notices your cursor and looks at it, reacts to clicks, and can be picked up, dragged and thrown. Walking around on its own arrives with the behavior engine in Phases 8–9.
 
 ## Requirements
 
@@ -23,13 +23,15 @@ npm run dev        # debug logging + developer items in the right-click menu
 npm test           # unit tests (Node's built-in test runner, no extra dependencies)
 ```
 
-In dev mode, right-click the pet for **Movement** (walk, run, stop, jump, turn around, drop from the top, walk/run to a spot, movement demo), **Play animation**, **Play all animations** and **Open DevTools**.
+In dev mode, right-click the pet for **Mouse** (ignore / curious / follow / shy), **Movement** (walk, run, stop, jump, turn around, drop from the top, walk/run to a spot, movement demo), **Play animation**, **Play all animations** and **Open DevTools**.
 
 Set the log level explicitly with `PET_LOG_LEVEL` (`debug`, `info`, `warn`, `error`, `silent`):
 
 ```powershell
 $env:PET_LOG_LEVEL = "debug"; npm start
 ```
+
+**Playing with Pip:** move the cursor near it and it looks at you. Click it and it's happy (poke it too often and it's confused). Drag it up and let go and it falls, or flick it and it flies and bounces off the screen edge.
 
 **To quit:** right-click the pet → **Quit**, or press `Ctrl+C` in the terminal that launched it.
 
@@ -62,7 +64,8 @@ desktop-pet/
 │       │   ├── MovementController.js   Position, walking, running, jumping, gravity (no DOM)
 │       │   └── CharacterView.js     The only DOM code for the pet
 │       ├── interaction/
-│       │   └── ClickThrough.js      Clickable pet, click-through everywhere else
+│       │   ├── ClickThrough.js      Clickable pet, click-through everywhere else
+│       │   └── MouseInteraction.js  Noticing the cursor, clicks, drag and throw
 │       ├── dev/demos.js         "Play all animations" and "Movement demo"
 │       ├── index.html
 │       └── styles/              main.css (page), character.css (pet + motions)
@@ -158,6 +161,35 @@ pet.placeAt(400, 0);               // teleport; above the ground it falls
 
 These become user settings in Phase 12.
 
+### Mouse interaction
+
+**Where the data comes from:** the main process forwards mouse *moves* to the pet window even while it is click-through, so the page knows where the cursor is anywhere above the taskbar. It never sees clicks meant for other apps. Cursor positions stay in memory and are never logged or sent anywhere.
+
+```text
+cursor within 220 px ─▶ noticed ─▶ Pip looks toward it (at most every 1.2 s, only when not busy)
+       │                          (forgotten again beyond 300 px, so no flicker at the edge)
+       ▼ what happens next depends on the mouse mode
+curious (default) ─▶ a fast dash close by startles it (surprised; then not again for 10 s)
+follow            ─▶ walks or runs underneath; jumps if the cursor is just above its head
+shy               ─▶ runs away when the cursor gets close; if cornered, dashes past it
+off               ─▶ nothing
+```
+
+| Input | Reaction |
+|---|---|
+| Click | `happy`; 4 pokes within 2.5 s → `confused` |
+| Press and move 5+ px | Picked up: everything stops, Pip dangles (`fall`) and follows the cursor |
+| Let go | Falls with the cursor's last speed: a flick throws it, and it bounces off screen edges |
+| Landing after a fall higher than 220 px | Dizzy (`confused`) |
+| After a click or a drop | Carries on walking or running if that's what it was doing |
+
+**Performance:**
+- Proximity is checked at most 10 times per second while the mouse moves.
+- A 150 ms re-check timer runs only while the cursor is near Pip or Follow mode is on. With the cursor far away, nothing runs.
+- During a drag, `ClickThrough.hold()` keeps the window accepting the mouse, and pointer capture keeps events coming even when the cursor races ahead of Pip.
+
+All thresholds live in `MOUSE_DEFAULTS` and become settings in Phase 12.
+
 ### Display handling
 
 The pet lives on the **primary display's work area** (the screen minus the taskbar).
@@ -244,6 +276,8 @@ Invalid frames (missing file, wrong type, or a path outside the folder) are skip
 - **`does not provide an export named 'BrowserWindow'`**: the environment variable `ELECTRON_RUN_AS_NODE=1` is set, which makes Electron behave like plain Node. It is inherited when a process is launched from a VS Code *extension* (not the integrated terminal). Clear it with `Remove-Item Env:ELECTRON_RUN_AS_NODE` and try again.
 - **Black box instead of a transparent background**: some GPU drivers mishandle transparent windows. Update your graphics driver.
 - **Multiple monitors**: not supported by design. The pet stays on the primary display.
+- **Cursor over the taskbar**: the pet window doesn't cover the taskbar, so Pip can't see the cursor there.
+- **Looking at the cursor** is left/right only. Frame-based art has no separate eyes or head to aim.
 - **Fullscreen apps**: the pet is always on top, so it also shows over fullscreen videos and games. Settings for this come in Phase 12.
 
 ## Roadmap
@@ -252,7 +286,7 @@ Invalid frames (missing file, wrong type, or a path outside the folder) are skip
 2. ✅ Character animation system
 3. ✅ Desktop movement
 4. ✅ Display handling: resolution, scaling, taskbar and sleep changes (single screen; multi-monitor intentionally skipped)
-5. Mouse interaction
+5. ✅ Mouse interaction
 6. Desktop icons and folders
 7. Application window awareness
 8. Personality engine

@@ -11,23 +11,40 @@ const SPOTS = [
   ['Random spot', 'random'],
 ];
 
-export function buildPetMenu({ character, isDev, sendCommand, openDevTools }) {
+// Keep the mode ids in sync with MOUSE_MODES in src/renderer/interaction/MouseInteraction.js.
+export const MOUSE_MODE_ITEMS = Object.freeze([
+  ['Ignore the mouse', 'off'],
+  ['Curious (look, get startled)', 'curious'],
+  ['Follow the mouse', 'follow'],
+  ['Shy (run away)', 'shy'],
+]);
+
+export function buildPetMenu({ character, isDev, mouseMode, sendCommand, openDevTools }) {
   const template = [
     { label: character?.name ?? 'Desktop Pet', enabled: false },
     { type: 'separator' },
   ];
-  if (isDev) template.push(...developerItems({ character, sendCommand, openDevTools }), { type: 'separator' });
+  if (isDev) template.push(...developerItems({ character, mouseMode, sendCommand, openDevTools }), { type: 'separator' });
   template.push({ label: 'Quit', click: () => app.quit() });
   return Menu.buildFromTemplate(template);
 }
 
-function developerItems({ character, sendCommand, openDevTools }) {
+function developerItems({ character, mouseMode, sendCommand, openDevTools }) {
   const items = [];
   if (character) {
     const command = (label, payload) => ({ label, click: () => sendCommand(payload) });
     const spotItems = (run) => SPOTS.map(([label, spot]) => command(label, { type: 'move-to', spot, run }));
 
     items.push(
+      {
+        label: 'Mouse',
+        submenu: MOUSE_MODE_ITEMS.map(([label, mode]) => ({
+          label,
+          type: 'radio',
+          checked: mode === mouseMode,
+          click: () => sendCommand({ type: 'mouse-mode', mode }),
+        })),
+      },
       {
         label: 'Movement',
         submenu: [

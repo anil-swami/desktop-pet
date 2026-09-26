@@ -1,4 +1,5 @@
-// Moves the pet around the pet window: walking, running, jumping and gravity.
+// Moves the pet around the pet window: walking, running, jumping, gravity,
+// and being picked up, dragged and thrown.
 //
 // Coordinates are CSS pixels inside the pet window, which covers the work area:
 //   x = horizontal centre of the pet
@@ -13,13 +14,14 @@
 // is moved, ever. The Ticker only runs while the pet is actually moving.
 //
 // The `animator` (the Character) is told what to show on movement
-// TRANSITIONS only (start, stop, jump, land, arrive), never every frame.
+// TRANSITIONS only (start, stop, jump, grab, land, arrive), never every frame.
 
 export const MOVEMENT_DEFAULTS = Object.freeze({
-  walkSpeed: 60,   // px per second
-  runSpeed: 190,   // px per second
-  gravity: 2400,   // px per second²
-  jumpSpeed: 600,  // initial upward speed; peak height = jumpSpeed² / (2 × gravity) ≈ 75 px
+  walkSpeed: 60,    // px per second
+  runSpeed: 190,    // px per second
+  gravity: 2400,    // px per second²
+  jumpSpeed: 600,   // initial upward speed; peak height = jumpSpeed² / (2 × gravity) ≈ 75 px
+  wallBounce: 0.35, // share of horizontal speed kept when a thrown pet hits a screen edge
 });
 
 const ARRIVE_EPSILON = 0.5;
@@ -32,14 +34,19 @@ export class MovementController {
   #log;
   #options;
   #halfWidth;
+  #height;
   #area;
 
   #x;
   #y;
+  #vx = 0;  // horizontal flight speed after a throw (walking uses #mode instead)
   #vy = 0;
   #mode = 'idle'; // horizontal intent: idle | walk | run
   #grounded = true;
   #jumping = false;
+  #held = false;
+  #highestY = 0;  // top of the current flight, to measure how far the pet fell
+  #lastFallHeight = 0;
   #target = null; // { x, resolve } while moveTo() is in progress
   #landingWaiters = [];
   #unsubscribe = null;
@@ -51,6 +58,7 @@ export class MovementController {
     this.#log = log;
     this.#options = { ...MOVEMENT_DEFAULTS, ...options };
     this.#halfWidth = size.width / 2;
+    this.#height = size.height;
     this.#area = { width: area.width, height: area.height };
     this.#x = area.width / 2;
     this.#y = area.height;
@@ -68,8 +76,26 @@ export class MovementController {
     return this.#grounded;
   }
 
+  get held() {
+    return this.#held;
+  }
+
+  get hasTarget() {
+    return this.#target !== null;
+  }
+
   get isMoving() {
-    return this.#mode !== 'idle' || !this.#grounded;
+    return !this.#held && (this.#mode !== 'idle' || !this.#grounded);
+  }
+
+  // Range the pet's centre can occupy horizontally.
+  get walkableRange() {
+    return { min: this.#halfWidth, max: Math.max(this.#halfWidth, this.#area.width - this.#halfWidth) };
+  }
+
+  // Height of the most recent fall, from the top of the flight to the ground.
+  get lastFallHeight() {
+    return this.#lastFallHeight;
   }
 
   // Teleport (clamped to the area). Above the ground, the pet falls.
@@ -77,11 +103,14 @@ export class MovementController {
     this.#settleTarget(false);
     this.#settleLanding(false);
     this.#mode = 'idle';
+    this.#held = false;
     this.#x = this.#clampX(x);
     this.#y = Math.min(y, this.#ground);
+    this.#vx = 0;
     this.#vy = 0;
     this.#jumping = false;
     this.#grounded = this.#y >= this.#ground;
+    this.#highestY = this.#y;
     this.#log.debug(`Placed at ${this.#where()}`);
     this.#render();
     this.#syncAnimation();
@@ -111,31 +140,82 @@ export class MovementController {
   }
 
   // Walk (or run) to x. Resolves true on arrival, false if interrupted.
-  moveTo(x, { run = false, label = null } = {}) {
+  // `quiet` skips the log line (for callers that re-target many times a second).
+  moveTo(x, { run = false, label = null, quiet = false } = {}) {
     this.#settleTarget(false);
+    if (this.#held) return Promise.resolve(false);
     const targetX = this.#clampX(x);
     if (Math.abs(targetX - this.#x) <= ARRIVE_EPSILON) {
       this.stop();
       return Promise.resolve(true);
     }
-    this.#log.debug(`Target: ${label ? `${label} ` : ''}x=${Math.round(targetX)}`);
+    if (!quiet) this.#log.debug(`Target: ${label ? `${label} ` : ''}x=${Math.round(targetX)}`);
     return new Promise((resolve) => {
       this.#target = { x: targetX, resolve };
       this.#setMotion(run ? 'run' : 'walk', targetX > this.#x ? 'right' : 'left');
     });
   }
 
-  // Resolves true when the pet lands, false if it could not jump (already airborne).
+  // Resolves true when the pet lands, false if it could not jump (airborne or held).
   jump() {
-    if (!this.#grounded) return Promise.resolve(false);
+    if (!this.#grounded || this.#held) return Promise.resolve(false);
     this.#grounded = false;
     this.#jumping = true;
     this.#vy = -this.#options.jumpSpeed;
+    this.#highestY = this.#y;
     this.#log.debug(`Jump from ${this.#where()}`);
     this.#syncAnimation();
     this.#updateTicking();
     return new Promise((resolve) => this.#landingWaiters.push(resolve));
   }
+
+  // --- Picked up by the mouse ----------------------------------------------------
+
+  // Everything stops while the pet is held; the mouse moves it with dragTo().
+  grab() {
+    this.#settleTarget(false);
+    this.#settleLanding(false);
+    this.#mode = 'idle';
+    this.#held = true;
+    this.#grounded = false;
+    this.#jumping = false;
+    this.#vx = 0;
+    this.#vy = 0;
+    this.#log.debug(`Grabbed at ${this.#where()}`);
+    this.#syncAnimation();
+    this.#updateTicking();
+  }
+
+  dragTo(x, y) {
+    if (!this.#held) return;
+    this.#x = this.#clampX(x);
+    this.#y = Math.min(Math.max(y, this.#height), this.#ground); // keep the whole pet on screen
+    this.#render();
+  }
+
+  // Let go, optionally with a throw velocity (px/s). Resolves true on landing.
+  release({ vx = 0, vy = 0 } = {}) {
+    if (!this.#held) return Promise.resolve(false);
+    this.#held = false;
+    this.#jumping = false;
+    this.#highestY = this.#y;
+    this.#log.debug(`Released at ${this.#where()} with velocity (${Math.round(vx)}, ${Math.round(vy)})`);
+
+    if (this.#y >= this.#ground && vy >= 0) {
+      this.#grounded = true;
+      this.#lastFallHeight = 0;
+      this.#syncAnimation();
+      return Promise.resolve(true);
+    }
+    this.#vx = vx;
+    this.#vy = vy;
+    if (Math.abs(vx) > 150) this.#animator.face(vx > 0 ? 'right' : 'left');
+    this.#syncAnimation();
+    this.#updateTicking();
+    return new Promise((resolve) => this.#landingWaiters.push(resolve));
+  }
+
+  // --------------------------------------------------------------------------------
 
   // The usable space changed (e.g. resolution or taskbar change).
   setArea({ width, height }) {
@@ -149,6 +229,7 @@ export class MovementController {
       this.#grounded = false;
       this.#jumping = false;
       this.#vy = 0;
+      this.#highestY = this.#y;
       this.#syncAnimation();
     }
     this.#updateTicking();
@@ -156,6 +237,7 @@ export class MovementController {
 
   // Advance by dt milliseconds. Called by the Ticker, or directly in tests.
   update(dt) {
+    if (this.#held) return;
     const seconds = dt / 1000;
     let arrived = false;
     let hitEdge = false;
@@ -181,13 +263,26 @@ export class MovementController {
     }
 
     if (!this.#grounded) {
+      if (this.#vx !== 0) {
+        const nextX = this.#x + this.#vx * seconds;
+        const clamped = this.#clampX(nextX);
+        if (clamped !== nextX) {
+          // Thrown into a screen edge: bounce back, softer.
+          this.#vx = -this.#vx * this.#options.wallBounce;
+          this.#animator.face(this.#vx > 0 ? 'right' : 'left');
+        }
+        this.#x = clamped;
+      }
       this.#vy += this.#options.gravity * seconds;
       this.#y += this.#vy * seconds;
+      this.#highestY = Math.min(this.#highestY, this.#y);
       if (this.#y >= this.#ground) {
         this.#y = this.#ground;
+        this.#vx = 0;
         this.#vy = 0;
         this.#grounded = true;
         this.#jumping = false;
+        this.#lastFallHeight = this.#ground - this.#highestY;
         landed = true;
       }
     }
@@ -223,6 +318,7 @@ export class MovementController {
   #startMoving(mode, direction) {
     if (direction !== 'left' && direction !== 'right') return;
     this.#settleTarget(false);
+    if (this.#held) return;
     this.#setMotion(mode, direction);
   }
 
@@ -237,7 +333,8 @@ export class MovementController {
   // Pick the animation that matches the current movement state.
   #syncAnimation() {
     let name = 'idle';
-    if (!this.#grounded) name = this.#jumping ? 'jump' : 'fall';
+    if (this.#held) name = 'fall'; // dangling from the cursor
+    else if (!this.#grounded) name = this.#jumping ? 'jump' : 'fall';
     else if (this.#mode !== 'idle') name = this.#mode;
     this.#animator.play(name);
   }
@@ -247,8 +344,8 @@ export class MovementController {
   }
 
   #clampX(x) {
-    const max = Math.max(this.#halfWidth, this.#area.width - this.#halfWidth);
-    return Math.min(Math.max(x, this.#halfWidth), max);
+    const { min, max } = this.walkableRange;
+    return Math.min(Math.max(x, min), max);
   }
 
   #updateTicking() {
