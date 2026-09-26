@@ -1,0 +1,206 @@
+// Visiting desktop icons: walk over, leap on top, sit down.
+//
+//   scan icons ─▶ pick a free one ─▶ walk to a take-off spot beside it
+//        ─▶ leap onto it (it becomes a one-way platform) ─▶ sit
+//        ─▶ keep checking: still on it? still there, same place, not covered?
+//        ─▶ hop down when asked, or when the icon moves or a window covers it
+//           (if the icon is deleted, the platform simply vanishes and the pet falls)
+//
+// Icons come from the main process (Windows helper). The pet only ever LOOKS at
+// icons: nothing here can open, move or change a file.
+
+export const DESKTOP_DEFAULTS = Object.freeze({
+  takeoffOffset: 70,    // px beside the icon's centre where the leap starts
+  surfaceInset: 0.15,   // share of the icon's width on each side that doesn't hold the pet
+  hopDistance: 80,      // px sideways when hopping down
+  checkEveryMs: 1000,   // is the pet still standing on the icon?
+  rescanEveryChecks: 5, // ...and every 5th check, is the icon unchanged and uncovered?
+  headroom: 4,          // px the pet needs above its head (icons near the top are skipped)
+});
+
+const silentLog = { debug() {}, info() {}, warn() {}, error() {} };
+
+function scanProblem(scan) {
+  if (!scan?.available) return `desktop icons are unavailable (${scan?.reason ?? 'no answer'})`;
+  if (!scan.visible) return 'desktop icons are hidden';
+  return null;
+}
+
+export class DesktopInteraction {
+  #character;
+  #getIcons;
+  #ticker;
+  #log;
+  #random;
+  #options;
+
+  #token = 0;          // bumped whenever the current plan is abandoned
+  #visit = null;       // { icon, token } while sitting on an icon
+  #checks = 0;
+  #stopChecking = null;
+
+  constructor({ character, getIcons, ticker, log = silentLog, random = Math.random, options = {} }) {
+    this.#character = character;
+    this.#getIcons = getIcons;
+    this.#ticker = ticker;
+    this.#log = log;
+    this.#random = random;
+    this.#options = { ...DESKTOP_DEFAULTS, ...options };
+  }
+
+  // The icon the pet is sitting on, or null.
+  get visiting() {
+    return this.#visit?.icon ?? null;
+  }
+
+  // Icons the pet could visit right now: not covered by a window, and low
+  // enough that the pet fits on top without its head leaving the screen.
+  visitable(scan) {
+    if (scanProblem(scan)) return [];
+    const minTop = this.#character.size.height + this.#options.headroom;
+    return scan.icons.filter((icon) => !icon.occluded && icon.y >= minTop);
+  }
+
+  // Visit an icon by id, or 'random'. Resolves true once the pet sits on it.
+  async visit(target = 'random') {
+    const token = this.#abandon();
+    const scan = await this.#getIcons();
+    if (token !== this.#token) return false;
+
+    const problem = scanProblem(scan);
+    if (problem) {
+      this.#log.info(`Can't visit an icon: ${problem}`);
+      return false;
+    }
+    const candidates = this.visitable(scan);
+    const icon = target === 'random'
+      ? candidates[Math.floor(this.#random() * candidates.length)]
+      : candidates.find((candidate) => candidate.id === target);
+    if (!icon) {
+      this.#log.info(target === 'random'
+        ? 'No icon is free to visit (covered by windows, or too close to the top)'
+        : 'That icon is covered, too close to the top, or gone');
+      return false;
+    }
+
+    // Start from the floor: if on another icon, drop down first.
+    if (this.#character.standingOn !== null || !this.#character.grounded) {
+      this.#character.setSurfaces([]);
+      await this.#character.whenLanded();
+      if (token !== this.#token) return false;
+    }
+
+    this.#log.info(`Visiting "${icon.name}" (${icon.kind})`);
+    const centreX = icon.x + icon.width / 2;
+    const side = this.#character.position.x <= centreX ? -1 : 1;
+    if (!(await this.#character.moveTo(centreX + side * this.#options.takeoffOffset, { label: 'take-off spot' }))) return false;
+    if (token !== this.#token) return false;
+
+    this.#character.setSurfaces([this.#surfaceFor(icon)]);
+    await this.#character.jumpTo(centreX, icon.y);
+    if (token !== this.#token) return false;
+    if (this.#character.standingOn !== icon.id) {
+      this.#log.info(`Missed "${icon.name}"`);
+      this.#character.setSurfaces([]);
+      return false;
+    }
+
+    this.#visit = { icon, token };
+    this.#checks = 0;
+    this.#character.play('sit');
+    this.#log.info(`Sitting on "${icon.name}"`);
+    this.#scheduleCheck(token);
+    return true;
+  }
+
+  // Hop down to the floor. Resolves true on landing.
+  leave() {
+    const visit = this.#visit;
+    this.#abandon();
+    if (!visit || this.#character.standingOn !== visit.icon.id) {
+      this.#character.setSurfaces([]);
+      return Promise.resolve(false);
+    }
+    const centreX = visit.icon.x + visit.icon.width / 2;
+    const { min, max } = this.#character.walkableRange;
+    const hop = this.#options.hopDistance;
+    let side = this.#random() < 0.5 ? -1 : 1;
+    if (centreX + side * hop < min || centreX + side * hop > max) side = -side;
+
+    this.#log.info(`Hopping down from "${visit.icon.name}"`);
+    const landing = this.#character.jumpTo(centreX + side * hop, this.#character.floorY);
+    this.#character.setSurfaces([]); // already airborne, so this can't make it fall
+    return landing;
+  }
+
+  // Forget any plan and remove the platform (a pet standing on it falls).
+  cancel() {
+    this.#abandon();
+    this.#character.setSurfaces([]);
+  }
+
+  dispose() {
+    this.#abandon();
+  }
+
+  #abandon() {
+    this.#token += 1;
+    this.#visit = null;
+    this.#stopChecking?.();
+    this.#stopChecking = null;
+    return this.#token;
+  }
+
+  // Only the middle of the icon holds the pet, so it visibly sits on the picture.
+  #surfaceFor(icon) {
+    const inset = icon.width * this.#options.surfaceInset;
+    return { id: icon.id, left: icon.x + inset, right: icon.x + icon.width - inset, top: icon.y };
+  }
+
+  #scheduleCheck(token) {
+    this.#stopChecking = this.#ticker.after(this.#options.checkEveryMs, () => {
+      this.#stopChecking = null;
+      this.#check(token);
+    });
+  }
+
+  async #check(token) {
+    const visit = this.#visit;
+    if (!visit || visit.token !== token) return;
+
+    // Walked off, dragged away, followed the mouse...: the visit is over.
+    if (this.#character.standingOn !== visit.icon.id) {
+      this.#log.debug(`No longer on "${visit.icon.name}"`);
+      this.cancel();
+      return;
+    }
+
+    this.#checks += 1;
+    if (this.#checks % this.#options.rescanEveryChecks === 0) {
+      const scan = await this.#getIcons();
+      if (this.#visit?.token !== token) return;
+      const problem = this.#problemWith(visit.icon, scan);
+      if (problem === 'gone') {
+        this.#log.info(`"${visit.icon.name}" disappeared!`);
+        this.cancel(); // no platform any more: the pet falls
+        return;
+      }
+      if (problem) {
+        this.#log.info(`Leaving "${visit.icon.name}": ${problem}`);
+        this.leave();
+        return;
+      }
+    }
+    this.#scheduleCheck(token);
+  }
+
+  #problemWith(icon, scan) {
+    if (!scan?.available) return null; // a helper hiccup is not a reason to jump
+    if (!scan.visible) return 'desktop icons were hidden';
+    const current = scan.icons.find((candidate) => candidate.id === icon.id);
+    if (!current) return 'gone';
+    if (Math.abs(current.x - icon.x) > 2 || Math.abs(current.y - icon.y) > 2) return 'it was moved';
+    if (current.occluded) return 'a window covered it';
+    return null;
+  }
+}

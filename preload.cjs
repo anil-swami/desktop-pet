@@ -16,6 +16,7 @@ const Channels = {
   SHOW_CONTEXT_MENU: 'pet:show-context-menu',
   LOG: 'pet:log',
   GET_CHARACTER: 'pet:get-character',
+  GET_DESKTOP_ICONS: 'pet:get-desktop-icons',
   COMMAND: 'pet:command',
 };
 
@@ -30,6 +31,9 @@ contextBridge.exposeInMainWorld('desktopPet', {
 
   // Request/response: resolves with the validated character data (or null).
   getCharacter: () => ipcRenderer.invoke(Channels.GET_CHARACTER),
+
+  // Request/response: desktop icon names, kinds and rectangles (no file paths).
+  getDesktopIcons: () => ipcRenderer.invoke(Channels.GET_DESKTOP_ICONS),
 
   // Subscribe to commands pushed by the main process. Returns an unsubscribe
   // function. Only the command object is passed on, never the IPC event

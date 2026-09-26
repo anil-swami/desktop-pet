@@ -19,17 +19,42 @@ export const MOUSE_MODE_ITEMS = Object.freeze([
   ['Shy (run away)', 'shy'],
 ]);
 
-export function buildPetMenu({ character, isDev, mouseMode, sendCommand, openDevTools }) {
+const MAX_ICONS_IN_MENU = 15;
+
+export function buildPetMenu({ character, isDev, mouseMode, desktopIcons, sendCommand, openDevTools }) {
   const template = [
     { label: character?.name ?? 'Desktop Pet', enabled: false },
     { type: 'separator' },
   ];
-  if (isDev) template.push(...developerItems({ character, mouseMode, sendCommand, openDevTools }), { type: 'separator' });
+  if (isDev) {
+    template.push(...developerItems({ character, mouseMode, desktopIcons, sendCommand, openDevTools }), { type: 'separator' });
+  }
   template.push({ label: 'Quit', click: () => app.quit() });
   return Menu.buildFromTemplate(template);
 }
 
-function developerItems({ character, mouseMode, sendCommand, openDevTools }) {
+// In Windows menus "&" marks a keyboard shortcut letter; "&&" shows a literal "&".
+const menuText = (text) => text.replaceAll('&', '&&');
+
+// Icons from the last scan that the pet could visit (not covered, room above).
+function iconItems(scan, character, sendCommand) {
+  if (!scan) return [{ label: 'Scanning desktop icons...', enabled: false }];
+  if (!scan.available) return [{ label: `Unavailable: ${menuText(scan.reason ?? 'unknown')}`.slice(0, 80), enabled: false }];
+  if (!scan.visible) return [{ label: 'Desktop icons are hidden', enabled: false }];
+
+  const free = scan.icons
+    .filter((icon) => !icon.occluded && icon.y >= character.height + 4)
+    .sort((a, b) => a.name.localeCompare(b.name));
+  if (free.length === 0) return [{ label: 'No free icons (covered by windows?)', enabled: false }];
+  const items = free.slice(0, MAX_ICONS_IN_MENU).map((icon) => ({
+    label: menuText(icon.name.length > 40 ? `${icon.name.slice(0, 39)}…` : icon.name),
+    click: () => sendCommand({ type: 'visit-icon', id: icon.id }),
+  }));
+  if (free.length > MAX_ICONS_IN_MENU) items.push({ label: `…and ${free.length - MAX_ICONS_IN_MENU} more`, enabled: false });
+  return items;
+}
+
+function developerItems({ character, mouseMode, desktopIcons, sendCommand, openDevTools }) {
   const items = [];
   if (character) {
     const command = (label, payload) => ({ label, click: () => sendCommand(payload) });
@@ -62,6 +87,16 @@ function developerItems({ character, mouseMode, sendCommand, openDevTools }) {
           { label: 'Run to', submenu: spotItems(true) },
           { type: 'separator' },
           command('Movement demo', { type: 'movement-demo' }),
+        ],
+      },
+      {
+        label: 'Desktop icons',
+        submenu: [
+          command('Visit a random icon', { type: 'visit-icon', id: 'random' }),
+          { type: 'separator' },
+          ...iconItems(desktopIcons, character, sendCommand),
+          { type: 'separator' },
+          command('Hop down', { type: 'leave-icon' }),
         ],
       },
       {

@@ -246,6 +246,113 @@ describe('MovementController', () => {
     assert.ok(movement.position.x < 950);
   });
 
+  test('lands on a surface when falling onto it', () => {
+    const { movement, animator, ticker } = setup();
+    movement.setSurfaces([{ id: 'icon', left: 450, right: 550, top: 300 }]);
+    movement.placeAt(500, 100);
+    runUntil(ticker, () => movement.grounded);
+    assert.equal(movement.standingOn, 'icon');
+    assert.equal(movement.position.y, 300);
+    assert.equal(animator.animation, 'idle');
+  });
+
+  test('surfaces are one-way: jump up through, land on the way down', () => {
+    const { movement, ticker } = setup();
+    movement.setSurfaces([{ id: 'low', left: 450, right: 550, top: 540 }]); // 60px above the floor
+    movement.jump();
+    runUntil(ticker, () => movement.grounded);
+    assert.equal(movement.standingOn, 'low');
+    assert.equal(movement.position.y, 540);
+  });
+
+  test('walking off the edge of a surface falls to the floor and keeps walking', () => {
+    const { movement, animator, ticker } = setup();
+    movement.setSurfaces([{ id: 'icon', left: 450, right: 550, top: 300 }]);
+    movement.placeAt(500, 250);
+    runUntil(ticker, () => movement.grounded);
+    movement.walk('right');
+    runUntil(ticker, () => !movement.grounded);
+    assert.equal(movement.standingOn, null);
+    assert.equal(animator.animation, 'fall');
+    runUntil(ticker, () => movement.grounded);
+    assert.equal(movement.position.y, 600);
+    assert.equal(animator.animation, 'walk');
+  });
+
+  test('removing or moving the surface under the pet makes it fall', () => {
+    const { movement, ticker } = setup();
+    const surface = { id: 'icon', left: 450, right: 550, top: 300 };
+    movement.setSurfaces([surface]);
+    movement.placeAt(500, 250);
+    runUntil(ticker, () => movement.grounded);
+    movement.setSurfaces([{ ...surface, top: 200 }]); // moved
+    assert.equal(movement.grounded, false);
+
+    runUntil(ticker, () => movement.grounded);
+    assert.equal(movement.position.y, 600); // the moved surface is above now; floor catches it
+    movement.setSurfaces([surface]);
+    movement.placeAt(500, 250);
+    runUntil(ticker, () => movement.grounded);
+    movement.setSurfaces([]); // removed
+    assert.equal(movement.grounded, false);
+  });
+
+  test('a pet standing on a surface does not fall when the floor moves', () => {
+    const { movement, ticker } = setup();
+    movement.setSurfaces([{ id: 'icon', left: 450, right: 550, top: 300 }]);
+    movement.placeAt(500, 250);
+    runUntil(ticker, () => movement.grounded);
+    movement.setArea({ width: 1000, height: 700 });
+    assert.equal(movement.grounded, true);
+    assert.equal(movement.standingOn, 'icon');
+  });
+
+  test('jumpTo leaps in an arc and lands on the target surface', async () => {
+    const { movement, animator, ticker } = setup();
+    movement.setSurfaces([{ id: 'icon', left: 280, right: 320, top: 150 }]); // 450px up, 200px left
+    const landed = movement.jumpTo(300, 150);
+    assert.equal(animator.animation, 'jump');
+    assert.equal(animator.direction, 'left');
+    runUntil(ticker, () => movement.grounded);
+    assert.equal(await landed, true);
+    assert.equal(movement.standingOn, 'icon');
+    assert.ok(Math.abs(movement.position.x - 300) < 1, `x=${movement.position.x}`);
+  });
+
+  test('jumpTo lands on target regardless of frame rate', () => {
+    for (const frame of [8, 16, 33, 50]) {
+      const { movement, ticker } = setup();
+      movement.setSurfaces([{ id: 'icon', left: 690, right: 710, top: 200 }]);
+      movement.jumpTo(700, 200);
+      for (let i = 0; i < 500 && !movement.grounded; i += 1) ticker.tick(frame);
+      assert.equal(movement.standingOn, 'icon', `at ${frame}ms frames`);
+    }
+  });
+
+  test('jumpTo from a surface down to the floor', async () => {
+    const { movement, ticker } = setup();
+    movement.setSurfaces([{ id: 'icon', left: 450, right: 550, top: 300 }]);
+    movement.placeAt(500, 250);
+    runUntil(ticker, () => movement.grounded);
+    const landed = movement.jumpTo(600, movement.floorY);
+    movement.setSurfaces([]);
+    runUntil(ticker, () => movement.grounded);
+    assert.equal(await landed, true);
+    assert.equal(movement.position.y, 600);
+    assert.ok(Math.abs(movement.position.x - 600) < 1);
+  });
+
+  test('whenLanded resolves immediately on the ground, or on landing', async () => {
+    const { movement, ticker } = setup();
+    assert.equal(await movement.whenLanded(), true);
+    movement.placeAt(500, 200);
+    let landed = false;
+    movement.whenLanded().then(() => { landed = true; });
+    runUntil(ticker, () => movement.grounded);
+    await Promise.resolve();
+    assert.equal(landed, true);
+  });
+
   test('renders every position change to the view', () => {
     const { movement, view, ticker } = setup();
     const before = view.positions.length;

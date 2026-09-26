@@ -1,14 +1,18 @@
 // Moves the pet around the pet window: walking, running, jumping, gravity,
-// and being picked up, dragged and thrown.
+// being picked up, dragged and thrown, and standing on platforms.
 //
 // Coordinates are CSS pixels inside the pet window, which covers the work area:
 //   x = horizontal centre of the pet
 //   y = where its feet are (grows downward, like screen coordinates)
-// The ground is the bottom of the window, i.e. the top of the taskbar.
+// The floor is the bottom of the window, i.e. the top of the taskbar.
 //
-// Physics is simple per-frame integration:
+// Surfaces are one-way platforms (e.g. desktop icons): the pet can jump up
+// through them and land on them when coming down, and falls off their edges.
+//
+// Physics per frame uses the exact formulas for constant gravity:
+//   position += velocity * dt + ½ * gravity * dt²
 //   velocity += gravity * dt
-//   position += velocity * dt
+// so an aimed jump lands in the same place at any frame rate.
 //
 // Rendering is a CSS transform on the pet (via the view): no Electron window
 // is moved, ever. The Ticker only runs while the pet is actually moving.
@@ -25,7 +29,11 @@ export const MOVEMENT_DEFAULTS = Object.freeze({
 });
 
 const ARRIVE_EPSILON = 0.5;
+const JUMP_CLEARANCE = 30; // an aimed jump peaks this far above the higher of start and target
 const silentLog = { debug() {}, info() {}, warn() {}, error() {} };
+
+const isSurface = (s) => s && typeof s.id === 'string'
+  && [s.left, s.right, s.top].every(Number.isFinite) && s.right > s.left;
 
 export class MovementController {
   #animator;
@@ -48,6 +56,8 @@ export class MovementController {
   #highestY = 0;  // top of the current flight, to measure how far the pet fell
   #lastFallHeight = 0;
   #target = null; // { x, resolve } while moveTo() is in progress
+  #surfaces = [];       // [{ id, left, right, top }]
+  #standingOn = null;   // id of the surface under the feet; null = the floor
   #landingWaiters = [];
   #unsubscribe = null;
 
@@ -98,6 +108,32 @@ export class MovementController {
     return this.#lastFallHeight;
   }
 
+  get floorY() {
+    return this.#area.height;
+  }
+
+  get standingOn() {
+    return this.#standingOn;
+  }
+
+  // Replace the platforms. If the one under the pet is gone or has moved, it falls.
+  setSurfaces(surfaces) {
+    this.#surfaces = (Array.isArray(surfaces) ? surfaces : [])
+      .filter(isSurface)
+      .map(({ id, left, right, top }) => ({ id, left, right, top }));
+    if (this.#grounded && this.#standingOn !== null) {
+      const surface = this.#surfaces.find((s) => s.id === this.#standingOn);
+      const stillThere = surface && surface.top === this.#y && this.#x >= surface.left && this.#x <= surface.right;
+      if (!stillThere) this.#fall();
+    }
+  }
+
+  // Resolves true when the pet is (or gets) back on something solid.
+  whenLanded() {
+    if (this.#grounded) return Promise.resolve(true);
+    return new Promise((resolve) => this.#landingWaiters.push(resolve));
+  }
+
   // Teleport (clamped to the area). Above the ground, the pet falls.
   placeAt(x, y = this.#ground) {
     this.#settleTarget(false);
@@ -109,6 +145,7 @@ export class MovementController {
     this.#vx = 0;
     this.#vy = 0;
     this.#jumping = false;
+    this.#standingOn = null;
     this.#grounded = this.#y >= this.#ground;
     this.#highestY = this.#y;
     this.#log.debug(`Placed at ${this.#where()}`);
@@ -160,10 +197,41 @@ export class MovementController {
   jump() {
     if (!this.#grounded || this.#held) return Promise.resolve(false);
     this.#grounded = false;
+    this.#standingOn = null;
     this.#jumping = true;
     this.#vy = -this.#options.jumpSpeed;
     this.#highestY = this.#y;
     this.#log.debug(`Jump from ${this.#where()}`);
+    this.#syncAnimation();
+    this.#updateTicking();
+    return new Promise((resolve) => this.#landingWaiters.push(resolve));
+  }
+
+  // Leap in an arc that lands exactly at (x, y), e.g. on top of a surface.
+  // Resolves true on landing (check `standingOn` to see what it landed on).
+  jumpTo(x, y) {
+    if (!this.#grounded || this.#held) return Promise.resolve(false);
+    this.#settleTarget(false);
+    const targetX = this.#clampX(x);
+    const targetY = Math.min(y, this.#ground);
+    const gravity = this.#options.gravity;
+
+    // Rise to an apex a little above the higher point, then drop onto the target:
+    //   rise = start → apex, drop = apex → target, speed = √(2·g·rise), time = √(2h/g) each way.
+    const apexY = Math.min(this.#y, targetY) - JUMP_CLEARANCE;
+    const rise = this.#y - apexY;
+    const drop = targetY - apexY;
+    const flightTime = Math.sqrt((2 * rise) / gravity) + Math.sqrt((2 * drop) / gravity);
+
+    this.#mode = 'idle';
+    this.#grounded = false;
+    this.#standingOn = null;
+    this.#jumping = true;
+    this.#vy = -Math.sqrt(2 * gravity * rise);
+    this.#vx = (targetX - this.#x) / flightTime;
+    this.#highestY = this.#y;
+    if (Math.abs(targetX - this.#x) > 4) this.#animator.face(targetX > this.#x ? 'right' : 'left');
+    this.#log.debug(`Leap from ${this.#where()} to (${Math.round(targetX)}, ${Math.round(targetY)})`);
     this.#syncAnimation();
     this.#updateTicking();
     return new Promise((resolve) => this.#landingWaiters.push(resolve));
@@ -178,6 +246,7 @@ export class MovementController {
     this.#mode = 'idle';
     this.#held = true;
     this.#grounded = false;
+    this.#standingOn = null;
     this.#jumping = false;
     this.#vx = 0;
     this.#vy = 0;
@@ -224,14 +293,8 @@ export class MovementController {
     if (this.#target) this.#target.x = this.#clampX(this.#target.x);
     if (this.#y > this.#ground) this.#y = this.#ground;
     this.#render();
-    if (this.#grounded && this.#y < this.#ground) {
-      // The ground dropped away beneath a standing pet (e.g. taskbar auto-hid): fall.
-      this.#grounded = false;
-      this.#jumping = false;
-      this.#vy = 0;
-      this.#highestY = this.#y;
-      this.#syncAnimation();
-    }
+    // The floor dropped away beneath a standing pet (e.g. taskbar auto-hid): fall.
+    if (this.#grounded && this.#standingOn === null && this.#y < this.#ground) this.#fall();
     this.#updateTicking();
   }
 
@@ -242,6 +305,7 @@ export class MovementController {
     let arrived = false;
     let hitEdge = false;
     let landed = false;
+    let walkedOff = false;
 
     if (this.#mode !== 'idle') {
       if (this.#target) {
@@ -260,6 +324,16 @@ export class MovementController {
       const clamped = this.#clampX(nextX);
       hitEdge = !arrived && clamped !== nextX;
       this.#x = clamped;
+
+      // Walked off the edge of a platform: start falling (and keep walking).
+      if (this.#grounded && this.#standingOn !== null && !this.#isAbove(this.#surfaceById(this.#standingOn))) {
+        this.#grounded = false;
+        this.#standingOn = null;
+        this.#jumping = false;
+        this.#vy = 0;
+        this.#highestY = this.#y;
+        walkedOff = true;
+      }
     }
 
     if (!this.#grounded) {
@@ -273,16 +347,30 @@ export class MovementController {
         }
         this.#x = clamped;
       }
-      this.#vy += this.#options.gravity * seconds;
-      this.#y += this.#vy * seconds;
+      const previousY = this.#y;
+      const startVy = this.#vy;
+      const gravity = this.#options.gravity;
+      this.#y += this.#vy * seconds + 0.5 * gravity * seconds * seconds;
+      this.#vy += gravity * seconds;
       this.#highestY = Math.min(this.#highestY, this.#y);
-      if (this.#y >= this.#ground) {
-        this.#y = this.#ground;
+
+      const surface = this.#vy > 0 ? this.#surfaceCrossed(previousY, this.#y) : null;
+      const landingY = surface ? surface.top : this.#ground;
+      if (this.#y >= landingY) {
+        // The feet touched down part-way through this frame. Solve
+        // ½·g·t² + vy·t = distance for that moment, and undo the sideways
+        // movement after it, so aimed jumps land exactly on target.
+        const touchdown = (-startVy + Math.sqrt(startVy * startVy + 2 * gravity * (landingY - previousY))) / gravity;
+        if (this.#vx !== 0 && touchdown >= 0 && touchdown <= seconds) {
+          this.#x = this.#clampX(this.#x - this.#vx * (seconds - touchdown));
+        }
+        this.#y = landingY;
         this.#vx = 0;
         this.#vy = 0;
         this.#grounded = true;
+        this.#standingOn = surface ? surface.id : null;
         this.#jumping = false;
-        this.#lastFallHeight = this.#ground - this.#highestY;
+        this.#lastFallHeight = landingY - this.#highestY;
         landed = true;
       }
     }
@@ -298,10 +386,10 @@ export class MovementController {
       this.#log.debug(`Reached the ${this.#x <= this.#halfWidth ? 'left' : 'right'} edge at ${this.#where()}`);
     }
     if (landed) {
-      this.#log.debug(`Landed at ${this.#where()}`);
+      this.#log.debug(`Landed at ${this.#where()}${this.#standingOn ? ` on ${this.#standingOn}` : ''}`);
       this.#settleLanding(true);
     }
-    if (arrived || hitEdge || landed) this.#syncAnimation();
+    if (arrived || hitEdge || landed || walkedOff) this.#syncAnimation();
     this.#updateTicking();
   }
 
@@ -313,6 +401,36 @@ export class MovementController {
 
   get #ground() {
     return this.#area.height;
+  }
+
+  // Start falling from where the pet stands (its support disappeared).
+  #fall() {
+    this.#grounded = false;
+    this.#standingOn = null;
+    this.#jumping = false;
+    this.#vy = 0;
+    this.#highestY = this.#y;
+    this.#log.debug(`Falling from ${this.#where()}`);
+    this.#syncAnimation();
+    this.#updateTicking();
+  }
+
+  #surfaceById(id) {
+    return this.#surfaces.find((surface) => surface.id === id) ?? null;
+  }
+
+  #isAbove(surface) {
+    return surface !== null && this.#x >= surface.left && this.#x <= surface.right;
+  }
+
+  // The first surface the feet passed through while moving down this frame.
+  #surfaceCrossed(fromY, toY) {
+    let best = null;
+    for (const surface of this.#surfaces) {
+      if (!this.#isAbove(surface) || surface.top < fromY || surface.top > toY) continue;
+      if (!best || surface.top < best.top) best = surface;
+    }
+    return best;
   }
 
   #startMoving(mode, direction) {

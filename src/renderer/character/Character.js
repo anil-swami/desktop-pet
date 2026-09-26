@@ -99,6 +99,15 @@ export class Character {
     return this.#movement.lastFallHeight;
   }
 
+  get floorY() {
+    return this.#movement.floorY;
+  }
+
+  // Id of the platform (e.g. desktop icon) the pet stands on, or null.
+  get standingOn() {
+    return this.#movement.standingOn;
+  }
+
   // --- Animation -------------------------------------------------------------
 
   play(name, options) {
@@ -137,6 +146,18 @@ export class Character {
 
   jump() {
     return this.#movement.jump();
+  }
+
+  jumpTo(x, y) {
+    return this.#movement.jumpTo(x, y);
+  }
+
+  whenLanded() {
+    return this.#movement.whenLanded();
+  }
+
+  setSurfaces(surfaces) {
+    this.#movement.setSurfaces(surfaces);
   }
 
   placeAt(x, y) {

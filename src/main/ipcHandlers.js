@@ -17,16 +17,18 @@ import { buildPetMenu, MOUSE_MODE_ITEMS } from './contextMenu.js';
 const log = createLogger('ipc');
 const rendererLog = createLogger('renderer');
 const MAX_LOG_LENGTH = 1000;
+const MENU_ICONS_MAX_AGE_MS = 30_000;
 
 export const Channels = Object.freeze({
   SET_CLICK_THROUGH: 'pet:set-click-through',
   SHOW_CONTEXT_MENU: 'pet:show-context-menu',
   LOG: 'pet:log',
   GET_CHARACTER: 'pet:get-character',
+  GET_DESKTOP_ICONS: 'pet:get-desktop-icons',
   COMMAND: 'pet:command',
 });
 
-export function registerIpcHandlers({ windowManager, getCharacter, isDev }) {
+export function registerIpcHandlers({ windowManager, getCharacter, desktopIcons, isDev }) {
   const fromPet = (event) => {
     if (windowManager.isPetWebContents(event.sender)) return true;
     log.warn('Ignored IPC from unknown sender');
@@ -44,10 +46,17 @@ export function registerIpcHandlers({ windowManager, getCharacter, isDev }) {
       if (!event.sender.isDestroyed()) event.sender.send(Channels.COMMAND, command);
     };
     const mouseMode = MOUSE_MODE_ITEMS.some(([, mode]) => mode === state?.mouseMode) ? state.mouseMode : null;
+
+    // The menu lists icons from the last scan; refresh it in the background
+    // (for next time) if it's old. Opening a menu must never wait for a scan.
+    const icons = desktopIcons.last;
+    if (isDev && (!icons || Date.now() - icons.time > MENU_ICONS_MAX_AGE_MS)) desktopIcons.scan();
+
     const menu = buildPetMenu({
       character: getCharacter(),
       isDev,
       mouseMode,
+      desktopIcons: icons,
       sendCommand,
       openDevTools: () => windowManager.openDevTools(),
     });
@@ -61,4 +70,7 @@ export function registerIpcHandlers({ windowManager, getCharacter, isDev }) {
 
   // Returns the validated character data (or null if none could be loaded).
   ipcMain.handle(Channels.GET_CHARACTER, (event) => (fromPet(event) ? getCharacter() : null));
+
+  // Fresh desktop icon scan: names, kinds and rectangles in window coordinates.
+  ipcMain.handle(Channels.GET_DESKTOP_ICONS, (event) => (fromPet(event) ? desktopIcons.scan() : null));
 }

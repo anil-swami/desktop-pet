@@ -8,6 +8,7 @@ import { Character } from './character/Character.js';
 import { CharacterView } from './character/CharacterView.js';
 import { ClickThrough } from './interaction/ClickThrough.js';
 import { MouseInteraction } from './interaction/MouseInteraction.js';
+import { DesktopInteraction } from './interaction/DesktopInteraction.js';
 import { playMovementDemo, playShowcase, stopDemos } from './dev/demos.js';
 
 const api = window.desktopPet;
@@ -18,6 +19,7 @@ const ticker = new Ticker();
 const clickThrough = new ClickThrough({ target: pet, api, ticker });
 let character = null;
 let mouse = null;
+let desktop = null;
 
 // The menu shows the current mouse mode, so send it along.
 pet.addEventListener('contextmenu', (event) => {
@@ -35,6 +37,7 @@ window.addEventListener('resize', () => {
   if (!character) return;
   const area = currentArea();
   if (area.width < 1 || area.height < 1) return; // transient size during a display change
+  desktop?.cancel(); // icon positions change with the display; get off any icon
   character.setArea(area);
   const { x, y } = character.position;
   log.debug(`Area: ${area.width}x${area.height}, pet at (${Math.round(x)}, ${Math.round(y)})`);
@@ -51,15 +54,22 @@ function spotX(name) {
   return Object.hasOwn(SPOTS, name) ? SPOTS[name] * width : null;
 }
 
-// A direct movement order overrides "follow the mouse".
-const MOVEMENT_COMMANDS = new Set(['walk', 'run', 'stop', 'move-to', 'movement-demo']);
+// A direct movement order overrides "follow the mouse" and any icon visit.
+const MOVEMENT_COMMANDS = new Set(['walk', 'run', 'stop', 'move-to', 'movement-demo', 'drop', 'visit-icon']);
 
 function handleCommand(command) {
   if (!character || typeof command?.type !== 'string') return;
   stopDemos();
   if (mouse?.mode === 'follow' && MOVEMENT_COMMANDS.has(command.type)) mouse.setMode('curious');
+  if (MOVEMENT_COMMANDS.has(command.type) && command.type !== 'visit-icon') desktop?.cancel();
 
   switch (command.type) {
+    case 'visit-icon':
+      if (typeof command.id === 'string') desktop?.visit(command.id);
+      break;
+    case 'leave-icon':
+      desktop?.leave();
+      break;
     case 'mouse-mode':
       mouse?.setMode(command.mode);
       break;
@@ -149,12 +159,20 @@ async function start() {
     onInteract: stopDemos,
   });
   mouse.attach(pet);
+
+  desktop = new DesktopInteraction({
+    character,
+    getIcons: () => api.getDesktopIcons(),
+    ticker,
+    log: createLogger('desktop'),
+  });
   api.onCommand(handleCommand);
   log.info(`Character "${data.name}" ready (${character.animationNames.length} animations), area ${area.width}x${area.height}`);
 }
 
 // Stop the loop and all timers if the page is ever torn down.
 window.addEventListener('beforeunload', () => {
+  desktop?.dispose();
   mouse?.dispose();
   character?.dispose();
   ticker.dispose();

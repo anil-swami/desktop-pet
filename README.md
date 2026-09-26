@@ -2,7 +2,7 @@
 
 A tiny cartoon creature that lives on your Windows desktop. Built with Electron and vanilla JavaScript.
 
-> **Status:** Phase 5 — Pip notices your cursor and looks at it, reacts to clicks, and can be picked up, dragged and thrown. Walking around on its own arrives with the behavior engine in Phases 8–9.
+> **Status:** Phase 6 — Pip reacts to your cursor, can be dragged and thrown, and can leap onto desktop icons and sit on them (dev menu). Walking around on its own arrives with the behavior engine in Phases 8–9.
 
 ## Requirements
 
@@ -23,7 +23,7 @@ npm run dev        # debug logging + developer items in the right-click menu
 npm test           # unit tests (Node's built-in test runner, no extra dependencies)
 ```
 
-In dev mode, right-click the pet for **Mouse** (ignore / curious / follow / shy), **Movement** (walk, run, stop, jump, turn around, drop from the top, walk/run to a spot, movement demo), **Play animation**, **Play all animations** and **Open DevTools**.
+In dev mode, right-click the pet for **Mouse** (ignore / curious / follow / shy), **Desktop icons** (visit one, hop down), **Movement** (walk, run, stop, jump, turn around, drop from the top, walk/run to a spot, movement demo), **Play animation**, **Play all animations** and **Open DevTools**.
 
 Set the log level explicitly with `PET_LOG_LEVEL` (`debug`, `info`, `warn`, `error`, `silent`):
 
@@ -49,6 +49,9 @@ desktop-pet/
 │   ├── main/                Main process (Node.js): windows, OS, IPC
 │   │   ├── WindowManager.js     Creates the transparent overlay window, click-through
 │   │   ├── DisplayManager.js    Watches the screen; reports work-area changes
+│   │   ├── WindowsHelper.js     Runs helpers/windows-helper.ps1; JSON over stdin/stdout
+│   │   ├── DesktopIcons.js      Desktop icon scans → window coordinates (no file paths)
+│   │   ├── helpers/windows-helper.ps1  Read-only Windows shell queries (PowerShell + C#)
 │   │   ├── CharacterLoader.js   Reads + validates character.json, fills in fallbacks
 │   │   ├── contextMenu.js       Native right-click menu
 │   │   ├── ipcHandlers.js       Validates and handles messages from the page
@@ -65,7 +68,8 @@ desktop-pet/
 │       │   └── CharacterView.js     The only DOM code for the pet
 │       ├── interaction/
 │       │   ├── ClickThrough.js      Clickable pet, click-through everywhere else
-│       │   └── MouseInteraction.js  Noticing the cursor, clicks, drag and throw
+│       │   ├── MouseInteraction.js  Noticing the cursor, clicks, drag and throw
+│       │   └── DesktopInteraction.js  Visiting desktop icons: walk, leap, sit, hop down
 │       ├── dev/demos.js         "Play all animations" and "Movement demo"
 │       ├── index.html
 │       └── styles/              main.css (page), character.css (pet + motions)
@@ -190,6 +194,33 @@ off               ─▶ nothing
 
 All thresholds live in `MOUSE_DEFAULTS` and become settings in Phase 12.
 
+### Desktop icons
+
+Pip can walk to a desktop icon, leap on top of it and sit there. It **only looks at icons**: nothing in the app can open, move, rename or change a file.
+
+**How icon positions are read.** Windows has no simple API for this. The documented way is the Shell COM API: `IShellWindows` → desktop `IShellBrowser` → `IShellView` → `IFolderView.GetItemPosition`. Node can't call COM directly, and a native addon would need C++ build tools. So a small helper script, [`windows-helper.ps1`](src/main/helpers/windows-helper.ps1), uses PowerShell and C#, which are built into every Windows 10/11 PC. **No npm dependency was added.**
+
+```text
+main process ── {"id":1,"command":"desktop-icons"} ──▶ PowerShell helper (C# compiled once, ~1 s)
+             ◀── {"id":1,"ok":true,"result":{...}} ──  names, kinds, rectangles, covered?
+```
+
+- The helper starts on first use, stays running for fast answers, and **stops after 2 idle minutes**. It exits by itself if the app quits or crashes, because its input closes.
+- **Read-only by construction:** the C# interfaces declare only read methods. `SelectAndPositionItems` (which moves icons) and `SetNameOf` (which renames) are not declared, so they cannot be called.
+- **No file paths leave the helper:** it turns each path into an anonymous id (a hash).
+- **"Covered" check:** the helper lists visible windows' **rectangles only** (never titles or contents). Pip only visits icons no window is covering.
+- If the helper can't run (e.g. PowerShell locked down by company policy), desktop icon features report "unavailable" and everything else keeps working.
+
+**Icons are platforms.** Icons usually sit far above the taskbar, so they become one-way platforms in `MovementController`, and Pip reaches them with an aimed leap:
+
+```text
+scan ─▶ pick a free icon ─▶ walk to a take-off spot beside it ─▶ leap (jumpTo) ─▶ sit
+      ─▶ every second: still on it?   every 5 s: rescan — moved, covered or hidden? ─▶ hop down
+      ─▶ icon deleted? the platform vanishes and Pip falls
+```
+
+`jumpTo(x, y)` solves the jump from physics: apex height → launch speed `√(2·g·h)` → flight time → horizontal speed. It also corrects for the exact touchdown moment within a frame, so the landing is on target at any frame rate.
+
 ### Display handling
 
 The pet lives on the **primary display's work area** (the screen minus the taskbar).
@@ -269,6 +300,17 @@ Invalid frames (missing file, wrong type, or a path outside the folder) are skip
 - The preload exposes only five functions on `window.desktopPet`.
 - Every IPC handler checks the sender is the pet window and validates argument types.
 - Character files are read by the main process only. Frame paths cannot leave their character folder.
+- The Windows helper is started by its full path (`%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe`), receives only fixed command names, and never gets input from the page.
+
+## Privacy: what the app reads from Windows
+
+| Feature | What is read | What is never read |
+|---|---|---|
+| Mouse interaction | Cursor position above the taskbar, while the app runs | Clicks in other apps, keystrokes |
+| Display handling | Screen size, work area, scaling | — |
+| Desktop icons | Icon names, kinds and positions; rectangles of windows covering them | File contents, file paths (hashed in the helper), window titles or contents |
+
+Everything stays on your PC and in memory: nothing is logged in bulk, stored or sent anywhere.
 - A Content-Security-Policy restricts the page to bundled files. Navigation and popups are blocked.
 
 ## Windows notes and troubleshooting
@@ -278,6 +320,11 @@ Invalid frames (missing file, wrong type, or a path outside the folder) are skip
 - **Multiple monitors**: not supported by design. The pet stays on the primary display.
 - **Cursor over the taskbar**: the pet window doesn't cover the taskbar, so Pip can't see the cursor there.
 - **Looking at the cursor** is left/right only. Frame-based art has no separate eyes or head to aim.
+- **Desktop icons covered by windows** are not visited: Windows only shows them when the desktop is visible. Minimise windows (or use the "show desktop" corner of the taskbar) to give Pip access.
+- **Icons in the top row** are skipped: Pip would stick out above the screen.
+- **"Show desktop icons" turned off** (right-click the desktop → View) means there's nothing to visit.
+- **Locked-down PCs**: if PowerShell is restricted by policy (Constrained Language Mode), the icon features are unavailable.
+- **Reacting when a folder is opened** needs window awareness and comes in Phase 7.
 - **Fullscreen apps**: the pet is always on top, so it also shows over fullscreen videos and games. Settings for this come in Phase 12.
 
 ## Roadmap
@@ -287,7 +334,7 @@ Invalid frames (missing file, wrong type, or a path outside the folder) are skip
 3. ✅ Desktop movement
 4. ✅ Display handling: resolution, scaling, taskbar and sleep changes (single screen; multi-monitor intentionally skipped)
 5. ✅ Mouse interaction
-6. Desktop icons and folders
+6. ✅ Desktop icons (visit, sit on, hop down; read-only)
 7. Application window awareness
 8. Personality engine
 9. Autonomous behavior

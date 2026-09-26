@@ -18,6 +18,12 @@ export function fakeTicker() {
     tick(dt) {
       for (const listener of [...listeners]) listener(dt);
     },
+    // Fire every pending (not cancelled) timer once, as if its time had come.
+    runTimers() {
+      const due = timers.splice(0).filter((timer) => !timer.cancelled);
+      for (const timer of due) timer.callback();
+      return due.length;
+    },
   };
 }
 

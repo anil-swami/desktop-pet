@@ -10,6 +10,8 @@ import { WindowManager } from './src/main/WindowManager.js';
 import { DisplayManager, describeDisplay } from './src/main/DisplayManager.js';
 import { registerIpcHandlers } from './src/main/ipcHandlers.js';
 import { loadCharacter } from './src/main/CharacterLoader.js';
+import { WindowsHelper } from './src/main/WindowsHelper.js';
+import { DesktopIcons } from './src/main/DesktopIcons.js';
 
 const log = createLogger('main');
 const isDev = process.argv.includes('--dev');
@@ -36,11 +38,20 @@ if (!app.requestSingleInstanceLock()) {
 } else {
   const windowManager = new WindowManager();
   const displayManager = new DisplayManager({ screen, powerMonitor, log: createLogger('display') });
+  // Read-only Windows shell queries (desktop icons). Starts on first use.
+  // process.pid is passed so the helper ignores the pet's own window.
+  const windowsHelper = new WindowsHelper({ petPid: process.pid, log: createLogger('helper') });
+  const desktopIcons = new DesktopIcons({
+    helper: windowsHelper,
+    toDipRect: (rect) => (process.platform === 'win32' ? screen.screenToDipRect(null, rect) : rect),
+    getWorkArea: () => displayManager.current.workArea,
+    log: createLogger('desktop'),
+  });
 
   app.whenReady().then(() => {
     log.info(`Starting Desktop Pet ${app.getVersion()} (Electron ${process.versions.electron}, log level: ${logLevel})`);
     const character = loadCharacterSafely(CHARACTER_ID);
-    registerIpcHandlers({ windowManager, getCharacter: () => character, isDev });
+    registerIpcHandlers({ windowManager, getCharacter: () => character, desktopIcons, isDev });
 
     // Keep the pet window fitted to the screen's work area as it changes.
     const display = displayManager.start((next) => windowManager.fitTo(next.workArea));
@@ -52,6 +63,7 @@ if (!app.requestSingleInstanceLock()) {
   app.on('window-all-closed', () => app.quit());
   app.on('will-quit', () => {
     displayManager.stop();
+    windowsHelper.stop();
     log.info('Shutting down');
   });
 }
