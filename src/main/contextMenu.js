@@ -9,7 +9,9 @@
 //   Live on its own / Speech bubbles / Notice which app I use / Settings...
 //   ─────────────
 //   Developer ▸   (only with `npm run dev`)
-//   Quit
+//   Hide Pip / Quit
+//
+// While paused, only: Resume, Hide, Settings, Quit.
 
 import { app, Menu } from 'electron';
 
@@ -32,12 +34,29 @@ const MAX_ICONS_IN_MENU = 15;
 
 // settings: current values (SettingsStore); setSetting(key, value) changes one.
 export function buildPetMenu({
-  character, isDev, mouseMode, settings, behavior, appsAvailable, desktopIcons,
+  character, isDev, mouseMode, settings, behavior, appsAvailable, desktopIcons, petControl,
   sendCommand, setSetting, openSettings, openDevTools,
 }) {
   const name = character?.name ?? 'Desktop Pet';
-  const doing = behavior?.state ? ` · ${behavior.state.toLowerCase().replaceAll('_', ' ')}` : '';
   const command = (label, payload) => ({ label, click: () => sendCommand(payload) });
+  const hideItem = { label: `Hide ${menuText(name)}`, click: () => petControl.hide() };
+  const quitItem = { label: 'Quit', click: () => app.quit() };
+
+  // Paused: the pet isn't taking orders, so keep the menu to the essentials.
+  if (petControl.paused) {
+    return Menu.buildFromTemplate([
+      { label: `${menuText(name)} · paused`, enabled: false },
+      { type: 'separator' },
+      { label: `Resume ${menuText(name)}`, click: () => petControl.resume() },
+      hideItem,
+      { type: 'separator' },
+      { label: 'Settings...', click: openSettings },
+      { type: 'separator' },
+      quitItem,
+    ]);
+  }
+
+  const doing = behavior?.state ? ` · ${behavior.state.toLowerCase().replaceAll('_', ' ')}` : '';
   const following = mouseMode === 'follow';
   const sleeping = behavior?.state === 'SLEEPING';
 
@@ -91,7 +110,7 @@ export function buildPetMenu({
       { type: 'separator' },
     );
   }
-  template.push({ label: 'Quit', click: () => app.quit() });
+  template.push(hideItem, quitItem);
   return Menu.buildFromTemplate(template);
 }
 

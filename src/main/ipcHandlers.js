@@ -52,7 +52,7 @@ function behaviorSummary(raw) {
 }
 
 export function registerIpcHandlers({
-  windowManager, settingsWindow, settings, getCharacter, desktopIcons, appAwareness, userPresence, isDev,
+  windowManager, settingsWindow, settings, petControl, getCharacter, desktopIcons, appAwareness, userPresence, isDev,
 }) {
   const fromPet = (event) => {
     if (windowManager.isPetWebContents(event.sender)) return true;
@@ -86,6 +86,7 @@ export function registerIpcHandlers({
       behavior: behaviorSummary(state?.behavior),
       appsAvailable: appAwareness.available,
       desktopIcons: icons,
+      petControl,
       sendCommand,
       setSetting: (key, value) => settings.set(key, value),
       openSettings: () => settingsWindow.open({ title: `${character?.name ?? 'Pet'} settings` }),
@@ -107,7 +108,7 @@ export function registerIpcHandlers({
 
   // The situation right now, for a renderer that just started (events it missed).
   ipcMain.handle(Channels.GET_CONTEXT, (event) => (fromPet(event)
-    ? { app: appAwareness.current, userAway: userPresence.away }
+    ? { app: appAwareness.current, userAway: userPresence.away, paused: petControl.resting }
     : null));
 
   ipcMain.handle(Channels.GET_SETTINGS, (event) => (fromPet(event) ? settings.all() : null));

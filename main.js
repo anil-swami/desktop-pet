@@ -17,6 +17,8 @@ import { AppAwareness } from './src/main/AppAwareness.js';
 import { UserPresence } from './src/main/UserPresence.js';
 import { SettingsStore } from './src/main/SettingsStore.js';
 import { SettingsWindow } from './src/main/SettingsWindow.js';
+import { PetControl } from './src/main/PetControl.js';
+import { TrayManager } from './src/main/TrayManager.js';
 
 const log = createLogger('main');
 const isDev = process.argv.includes('--dev');
@@ -69,8 +71,11 @@ if (!app.requestSingleInstanceLock()) {
   });
 
   const settingsWindow = new SettingsWindow();
+  const petControl = new PetControl({ windowManager, sendToPet, log: createLogger('pet') });
   let settings = null;
   let character = null;
+  let tray = null;
+  const openSettings = () => settingsWindow.open({ title: `${character?.name ?? 'Pet'} settings` });
 
   // Settings the main process applies itself; everything else goes to the pet page.
   function onSettingsChanged({ changed, values }) {
@@ -82,6 +87,7 @@ if (!app.requestSingleInstanceLock()) {
     settingsWindow.send(SettingsChannels.CHANGED, values);
     if ('character' in changed || 'scale' in changed) {
       if ('character' in changed) character = loadCharacterSafely(values.character) ?? character;
+      tray?.refresh(); // the name and the character list
       windowManager.reloadPet(); // the page starts over with the new look
       return;
     }
@@ -90,6 +96,8 @@ if (!app.requestSingleInstanceLock()) {
 
   app.whenReady().then(() => {
     log.info(`Starting Desktop Pet ${app.getVersion()} (Electron ${process.versions.electron}, log level: ${logLevel})`);
+    // Lets Windows group the tray icon and windows under one app identity.
+    if (process.platform === 'win32') app.setAppUserModelId('com.anilswami.desktoppet');
     settings = new SettingsStore({
       file: path.join(app.getPath('userData'), 'settings.json'),
       getCharacters: () => listCharacters(),
@@ -100,7 +108,7 @@ if (!app.requestSingleInstanceLock()) {
     character = loadCharacterSafely(settings.get('character')) ?? loadCharacterSafely('default');
 
     registerIpcHandlers({
-      windowManager, settingsWindow, settings, getCharacter: () => character,
+      windowManager, settingsWindow, settings, petControl, getCharacter: () => character,
       desktopIcons, appAwareness, userPresence, isDev,
     });
     userPresence.start();
@@ -111,13 +119,30 @@ if (!app.requestSingleInstanceLock()) {
     log.info(describeDisplay(display));
     windowManager.createPetWindow({ bounds: display.workArea, devTools: isDev, alwaysOnTop: settings.get('alwaysOnTop') });
 
+    // The tray icon: the pet can always be reached, even hidden or paused.
+    tray = new TrayManager({
+      petControl,
+      settings,
+      openSettings,
+      getName: () => character?.name ?? 'Desktop Pet',
+      listCharacters: () => listCharacters(),
+      exit: () => app.quit(),
+    });
+    tray.create();
+    petControl.onChange(() => tray.refresh());
+
     // Developer convenience: `npm run dev -- --open-settings` opens the settings window at start.
-    if (process.argv.includes('--open-settings')) settingsWindow.open({ title: `${character?.name ?? 'Pet'} settings` });
+    if (process.argv.includes('--open-settings')) openSettings();
   });
 
-  app.on('second-instance', () => log.info('Second launch attempt ignored'));
+  // Launching the app again while it runs: bring the pet back into view.
+  app.on('second-instance', () => {
+    log.info('Second launch: showing the pet');
+    petControl.show();
+  });
   app.on('window-all-closed', () => app.quit());
   app.on('will-quit', () => {
+    tray?.destroy();
     settings?.flush();
     displayManager.stop();
     userPresence.stop();

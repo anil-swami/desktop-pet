@@ -23,6 +23,7 @@ npm run dev        # debug logging + developer items in the right-click menu
 npm test           # unit tests (Node's built-in test runner, no extra dependencies)
 npm run build:helper   # force a rebuild of the Windows helper (normally automatic)
 npm run dev -- --open-settings   # also open the settings window at start
+npm run icons      # regenerate the tray/window icons from assets/icons/pet-icon.svg
 ```
 
 `npm start` and `npm run dev` first compile the small Windows helper (`build/windows-helper.exe`) if its source changed. See [Windows helper](#windows-helper).
@@ -37,7 +38,7 @@ $env:PET_LOG_LEVEL = "debug"; npm start
 
 **Playing with Pip:** click it, double-click it, rub the cursor back and forth over it to pet it, drag and throw it, or feed it from the menu. Minimise your windows and it goes icon-hopping.
 
-**To quit:** right-click the pet → **Quit**, or press `Ctrl+C` in the terminal that launched it.
+**To quit:** click the [tray icon](#the-tray-icon) next to the clock → **Exit**, or right-click the pet → **Quit**, or press `Ctrl+C` in the terminal that launched it.
 
 ## Interacting with Pip
 
@@ -67,8 +68,32 @@ $env:PET_LOG_LEVEL = "debug"; npm start
 | Speech bubbles | bubbles on/off |
 | Notice which app I use | app awareness on/off |
 | Settings... | opens the [settings window](#settings) |
+| Hide Pip | hides it; bring it back from the tray icon |
 
 Any order is cut short by the next order, a click or a drag.
+
+### The tray icon
+
+Pip has no normal app window or taskbar button. Its home is the **tray icon** next to the clock. If it's in the hidden icons, open them with **^**. Left- or right-click the icon:
+
+```text
+Pip
+──────────────
+Pause Pip
+Resume Pip
+Hide Pip        (Show Pip while hidden)
+──────────────
+Settings...
+──────────────
+Change character ▸
+──────────────
+Exit
+```
+
+- **Pause:** Pip falls asleep where it is, looks faded, and ignores clicks, orders and the cursor. It stays paused until you choose Resume, and it wakes up with "Good nap!". While paused, right-clicking Pip shows a short menu: Resume, Hide, Settings, Quit.
+- **Hide:** the pet disappears and rests until you choose **Show**.
+- **Starting Pip again** while it runs (e.g. `npm start` a second time) doesn't open a second pet. It just shows the hidden one.
+- The icon turns **grey** while Pip is paused or hidden, and the tooltip says which.
 
 ## Build
 
@@ -81,7 +106,10 @@ desktop-pet/
 ├── main.js                  Entry point: app lifecycle (main process)
 ├── preload.cjs              The only bridge between the pet page and the main process
 ├── settings-preload.cjs     The same, for the settings window
-├── scripts/build-helper.mjs Compiles the Windows helper with the C# compiler built into Windows
+├── scripts/
+│   ├── build-helper.mjs     Compiles the Windows helper with the C# compiler built into Windows
+│   ├── make-icons.mjs       Renders assets/icons/pet-icon.svg into pet.ico / pet-paused.ico
+│   └── ico.mjs              Packs PNGs into a multi-size .ico file
 ├── src/
 │   ├── config/settingsSchema.js  Every setting: type, default, limits, label (shared)
 │   ├── main/                Main process (Node.js): windows, OS, IPC
@@ -95,6 +123,9 @@ desktop-pet/
 │   │   ├── SettingsStore.js     Loads, validates, saves (debounced, atomic) and announces settings
 │   │   ├── SettingsWindow.js    The settings window
 │   │   ├── CharacterLoader.js   Reads + validates character.json, fills in fallbacks
+│   │   ├── PetControl.js        Paused / hidden state, shared by the tray and the pet menu
+│   │   ├── TrayManager.js       The tray icon: menu, tooltip, grey icon while resting
+│   │   ├── trayMenu.js          The tray menu's items (plain data, unit-tested)
 │   │   ├── contextMenu.js       Native right-click menu
 │   │   ├── ipcHandlers.js       Validates and handles messages from the page
 │   │   └── logger.js            Leveled [Pet:scope] logging
@@ -131,6 +162,7 @@ desktop-pet/
 │       ├── index.html
 │       └── styles/              main.css, character.css (pet + motions), bubble.css, effects.css
 ├── assets/characters/default/   Pip: character.json + 13 SVG frames
+├── assets/icons/            Tray and window icons (generated from pet-icon.svg)
 ├── assets/items/treat.svg   The cookie you can feed Pip
 └── tests/                   Unit tests (node --test)
 ```
@@ -223,7 +255,7 @@ pet.placeAt(400, 0);                   // teleport; above the floor it falls
 | Gravity | 2400 px/s² | `gravity` |
 | Jump speed | 600 px/s (≈ 75 px high) | `jumpSpeed` |
 
-These become user settings in Phase 12.
+Walk and run speed are in [Settings](#settings); gravity and jump speed aren't.
 
 ### Autonomous behavior
 
@@ -306,6 +338,24 @@ SettingsStore (main)         settings window builds its controls from the schema
 1. Add an entry to `SETTINGS` in [`settingsSchema.js`](src/config/settingsSchema.js). The window shows it automatically.
 2. Apply it: in `applySettings()` in `renderer.js` for the pet page, or in `onSettingsChanged()` in `main.js` for main-process settings.
 
+### System tray
+
+```text
+tray menu ─┐                  ┌─▶ pet page: { type: 'pause', paused }  → sleep, fade, ignore input
+pet menu  ─┼─▶ PetControl ────┼─▶ WindowManager.hidePet() / showPet()
+2nd launch ┘  (paused, hidden) └─▶ TrayManager.refresh(): menu, tooltip, grey icon
+```
+
+- **One owner for the state.** `PetControl` in the main process decides whether Pip is paused or hidden. The tray, the pet menu and a second launch all call it, so they can't disagree. A hidden pet also rests, since nobody can see it.
+- **The page asks on load.** `pet:get-context` includes `paused`, so a page reload (e.g. after changing Size) keeps a paused Pip paused.
+- **Paused means paused.** `renderer.js` turns autonomy off, suspends `MouseInteraction` (no clicks, drags, petting or cursor-watching), ignores orders, and freezes CSS motions. Only the right-click menu still works, so you can resume from it.
+- **The tray menu is plain data.** `trayMenu.js` builds the template without Electron, so it's unit-tested. `TrayManager` rebuilds the menu whenever something changes, because a native menu can't be edited in place.
+- **Icons:**
+  - `pet.ico` holds the icon at 16–256 px, and Windows picks the size that fits the display scaling.
+  - `npm run icons` renders them from `pet-icon.svg` with Electron's own Chromium (no image library), and `scripts/ico.mjs` packs the PNGs into `.ico` files.
+  - `app.setAppUserModelId()` groups the app's windows and notifications under one identity.
+- **Security:** no new IPC channels. The main process tells the page it's paused through the existing `pet:command` push. The page itself can't pause, hide or show anything: only your clicks on native menus can.
+
 ### Speech bubbles
 
 Pip talks in small comic bubbles: **speech** (rounded, with a tail) or **thought** (a cloud with little dots, e.g. "Zzz..." while napping).
@@ -328,8 +378,7 @@ dialogue.think('Zzz...');                           // a thought bubble
 - A topic never repeats the same line twice in a row.
 - A bubble stays up for 2.2–6 s, depending on length.
 - **Quiet mode:** while a fullscreen app runs or you're away, only replies appear.
-- **Speech bubbles** in the right-click menu turns them off.
-- Chattiness becomes a setting in Phase 12.
+- **Speech bubbles** in the right-click menu turns them off, and **Chattiness** in Settings makes ambient lines rarer or more frequent.
 
 **Placement and accessibility** (`BubbleView`):
 - The bubble lives *inside* the pet element, so it moves with Pip for free.
@@ -380,7 +429,7 @@ off               ─▶ nothing
 | Let go | Falls with the cursor's last speed: a flick throws it, and it bounces off screen edges |
 | Landing after a fall higher than 220 px | Dizzy (`confused`) |
 
-While the mouse is busy with Pip (pressing, dragging, reacting, following), the autonomous behavior waits. All thresholds live in `MOUSE_DEFAULTS` and become settings in Phase 12.
+While the mouse is busy with Pip (pressing, dragging, reacting, following), the autonomous behavior waits. The mode is the **React to the mouse** setting. The distances and timings live in `MOUSE_DEFAULTS`.
 
 ### Desktop icons
 
@@ -501,7 +550,7 @@ iconSit: ['Comfy!', 'Nice spot!', 'Ooh, "{name}"!'],
 }
 ```
 
-4. Temporarily change `CHARACTER_ID` in `main.js` (a setting in Phase 12), run `npm run dev`, and right-click → **Play all animations**.
+4. Run `npm run dev`, pick it in **Settings → Character** (or tray → **Change character**), and right-click → **Play all animations**.
 
 | Field | Meaning |
 |---|---|
@@ -567,7 +616,8 @@ Everything stays on your PC and in memory: nothing is logged in bulk, stored or 
 - **"Show desktop icons" turned off** (right-click the desktop → View) means there's nothing to visit.
 - **Apps running as administrator** may be reported without a name, and are then treated as "other".
 - **Fullscreen apps**: with **Always on top** on, the pet shows over fullscreen videos and games, but calms down and stays quiet. Turn Always on top off if you'd rather apps cover it.
-- **Ghost mode stuck?** With "Let clicks pass through the pet" on, hold **Ctrl** and move the mouse over the pet to reach its menu again.
+- **Ghost mode stuck?** With "Let clicks pass through the pet" on, hold **Ctrl** and move the mouse over the pet to reach its menu again, or use the tray icon.
+- **Can't find the tray icon?** Windows 11 puts new icons in the hidden area (**^** next to the clock). To keep it visible, go to Settings → Personalization → Taskbar → Other system tray icons. While running from source, it's listed as **Electron**.
 
 ## Roadmap
 
@@ -583,6 +633,6 @@ Everything stays on your PC and in memory: nothing is logged in bulk, stored or 
 10. ✅ Speech bubbles
 11. ✅ Character interaction and pet menu
 12. ✅ Settings
-13. System tray
+13. ✅ System tray (pause, hide, settings, change character, exit)
 14. Start with Windows
 15. Performance pass

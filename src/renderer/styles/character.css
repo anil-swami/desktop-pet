@@ -95,10 +95,18 @@ body.is-dragging .pet {
   animation: none !important;
 }
 
-/* While you're away (settings: Rest when I'm away): pause all looping effects. */
+/* While you're away (settings: Rest when I'm away) or paused (tray): freeze all effects. */
 .is-resting .pet__sprite,
-.is-resting .effect {
+.is-resting .effect,
+.is-paused .pet__sprite,
+.is-paused .effect {
   animation-play-state: paused !important;
+}
+
+/* Paused from the tray: a little faded, so it's clear it isn't doing anything. */
+.is-paused .pet__facing {
+  opacity: 0.8;
+  filter: saturate(0.45);
 }
 
 /* Shown only if no character could be loaded at all. */

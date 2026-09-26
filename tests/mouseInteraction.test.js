@@ -205,6 +205,19 @@ describe('MouseInteraction: petting, double-click, waking', () => {
     assert.equal(character.animation, 'wake');
   });
 
+  test('while suspended (paused pet), clicks, drags, petting and noticing do nothing', () => {
+    const { mouse, events, move, click, character } = withEvents();
+    mouse.setSuspended(true);
+    click();
+    rub(move, 8);
+    move(320, 550);
+    assert.deepEqual(events, []);
+    assert.equal(character.held, false);
+    mouse.setSuspended(false);
+    click(800);
+    assert.ok(events.includes('click'));
+  });
+
   test('pointer is the last known cursor position', () => {
     const { mouse, move } = withEvents();
     assert.equal(mouse.pointer, null);

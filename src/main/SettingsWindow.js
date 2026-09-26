@@ -30,6 +30,7 @@ export class SettingsWindow {
       minWidth: 420,
       minHeight: 480,
       title,
+      icon: path.join(appRoot, 'assets', 'icons', 'pet.ico'),
       show: false,
       autoHideMenuBar: true,
       maximizable: false,

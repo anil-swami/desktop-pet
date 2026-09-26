@@ -42,9 +42,9 @@ const bubbles = new BubbleView({
 view.onMove(() => bubbles.reposition());
 const dialogue = new DialogueManager({ view: bubbles, ticker, random, log: createLogger('dialogue') });
 
-// No chatter over fullscreen apps, or while nobody is there to read it.
-const quiet = { fullscreen: false, away: false };
-const updateQuiet = () => dialogue.setQuiet(quiet.fullscreen || quiet.away);
+// No chatter over fullscreen apps, while nobody is there to read it, or while paused.
+const quiet = { fullscreen: false, away: false, paused: false };
+const updateQuiet = () => dialogue.setQuiet(quiet.fullscreen || quiet.away || quiet.paused);
 
 // The menu shows what the pet is doing (settings toggles come from the main process).
 pet.addEventListener('contextmenu', (event) => {
@@ -79,11 +79,34 @@ function applySettings(next) {
   if (!character) return; // the rest needs the pet (applied again once it exists)
   character.setMovementOptions({ walkSpeed: settings.walkSpeed, runSpeed: settings.runSpeed });
   character.setAnimationSpeed(settings.animationSpeed ?? 1);
-  behavior?.setEnabled(settings.autonomous !== false);
+  behavior?.setEnabled(settings.autonomous !== false && !quiet.paused);
   behavior?.setPace(PACE[settings.activityLevel] ?? 1);
   if (mouse) {
     if (settings.mouseReactions === false) mouse.setMode('off');
     else if (mouse.mode === 'off') mouse.setMode('curious');
+  }
+}
+
+// --- Paused (tray: Pause / Hide) ----------------------------------------------------
+// Pip curls up asleep and does nothing: no autonomy, reactions or bubbles, the
+// mouse only reaches the right-click menu, and animations freeze.
+
+function applyPause(paused) {
+  if (paused === quiet.paused) return;
+  quiet.paused = paused;
+  document.body.classList.toggle('is-paused', paused);
+  updateQuiet();
+  mouse?.setSuspended(paused);
+  if (!character) return;
+  behavior?.setEnabled(settings.autonomous !== false && !paused);
+  if (paused) {
+    stopDemos();
+    if (mouse?.mode === 'follow') mouse.setMode(restingMouseMode());
+    character.stop();
+    character.play('sleep');
+  } else {
+    character.play('wake');
+    dialogue.topic('wake', { priority: 'reply' });
   }
 }
 
@@ -206,6 +229,11 @@ function handleCommand(command) {
     applySettings(command.settings);
     return;
   }
+  if (command.type === 'pause') {
+    applyPause(command.paused === true);
+    return;
+  }
+  if (quiet.paused) return; // a paused pet takes no orders
   // Orders from the pet menu.
   if (Object.hasOwn(ORDER_COMMANDS, command.type)) {
     stopDemos();
@@ -376,10 +404,11 @@ async function start() {
     const context = await api.getContext();
     if (context?.app) handleCommand({ type: 'app-changed', app: context.app });
     if (context?.userAway) handleCommand({ type: 'user-away', away: true });
+    if (context?.paused) applyPause(true); // e.g. the page reloaded while paused
   } catch (err) {
     log.warn(`Could not get the current context: ${err.message}`);
   }
-  dialogue.topic('greeting', { priority: 'event' });
+  if (!quiet.paused) dialogue.topic('greeting', { priority: 'event' });
   behavior.start();
   log.info(`Character "${data.name}" ready (${character.animationNames.length} animations), area ${area.width}x${area.height}`);
 }

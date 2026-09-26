@@ -125,6 +125,18 @@ export class WindowManager {
     log.debug(`Click-through ${enabled ? 'ON' : 'OFF'}`);
   }
 
+  hidePet() {
+    this.petWindow?.hide();
+  }
+
+  // Show (without taking focus) and bring above other windows.
+  showPet() {
+    const win = this.petWindow;
+    if (!win) return;
+    win.showInactive();
+    win.moveTop();
+  }
+
   setAlwaysOnTop(onTop) {
     this.petWindow?.setAlwaysOnTop(onTop);
     log.info(`Always on top: ${onTop ? 'on' : 'off'}`);

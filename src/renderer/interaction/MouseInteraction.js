@@ -81,6 +81,7 @@ export class MouseInteraction {
   #rub = { lastX: null, direction: 0, travel: 0, turns: [] };
   #lastPetAt = -Infinity;
 
+  #suspended = false; // paused pet: ignore clicks, drags, petting and the cursor
   #interaction = 0;   // bumped by every click/grab/reaction; stale follow-ups check it
   #reaction = null;   // id of the reaction animation currently playing
   #stopEvaluating = null;
@@ -127,6 +128,17 @@ export class MouseInteraction {
   // fleeing, or following): the autonomous behavior waits.
   get busy() {
     return this.#press !== null || this.#dragging || this.#reaction !== null || this.#fleeing || this.#mode === 'follow';
+  }
+
+  // While suspended (pet paused) the mouse does nothing to the pet. The
+  // right-click menu still works: it's handled outside this class.
+  setSuspended(suspended) {
+    this.#suspended = suspended === true;
+    if (this.#suspended) {
+      this.handlePointerCancel();
+      this.#noticed = false;
+      this.#updateEvaluating();
+    }
   }
 
   setMode(mode) {
@@ -182,12 +194,13 @@ export class MouseInteraction {
       this.#pressMove(x, y, time);
       return;
     }
+    if (this.#suspended) return;
     this.#detectPetting(x, y, time);
     if (time - this.#lastEvaluate >= this.#options.moveEvaluateMs) this.evaluate(time);
   }
 
   handlePointerDown(x, y, time) {
-    if (this.#press) return;
+    if (this.#press || this.#suspended) return;
     this.#pointer = { x, y, time };
     this.#press = { x, y, offsetX: 0, offsetY: 0 };
     this.#releasePointer = this.#holdPointer();
@@ -216,7 +229,7 @@ export class MouseInteraction {
 
   evaluate(time = this.#now()) {
     this.#lastEvaluate = time;
-    if (this.#mode === 'off' || !this.#pointer) {
+    if (this.#mode === 'off' || !this.#pointer || this.#suspended) {
       this.#noticed = false;
       this.#updateEvaluating();
       return;
@@ -356,7 +369,7 @@ export class MouseInteraction {
   // Keep re-checking while something is going on, even without mouse moves
   // (e.g. the cursor rests above a following pet). Otherwise stay idle.
   #updateEvaluating() {
-    const engaged = this.#mode === 'follow' || (this.#mode !== 'off' && this.#noticed);
+    const engaged = !this.#suspended && (this.#mode === 'follow' || (this.#mode !== 'off' && this.#noticed));
     if (engaged && !this.#stopEvaluating) {
       this.#stopEvaluating = this.#ticker.after(this.#options.evaluateEveryMs, () => {
         this.#stopEvaluating = null;
