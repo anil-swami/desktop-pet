@@ -1,0 +1,28 @@
+{
+  "name": "Pip",
+  "size": { "width": 96, "height": 96 },
+  "facing": "right",
+  "animations": {
+    "idle":      { "frames": ["idle.svg"], "motion": "breathe" },
+    "blink":     { "frames": [{ "src": "blink.svg", "ms": 140 }], "motion": "breathe" },
+    "walk":      { "frames": ["walk-1.svg", "walk-2.svg"], "fps": 5, "motion": "bob" },
+    "run":       { "frames": ["run-1.svg", "run-2.svg"], "fps": 10, "motion": "bounce" },
+    "sit":       { "frames": ["sit.svg"], "motion": "breathe" },
+    "sleep":     { "frames": ["sleep.svg"], "motion": "breathe-slow" },
+    "wake": {
+      "frames": [
+        { "src": "sleep.svg", "ms": 450 },
+        { "src": "sit.svg", "ms": 300 },
+        { "src": "blink.svg", "ms": 150 },
+        { "src": "idle.svg", "ms": 200 },
+        { "src": "blink.svg", "ms": 120 },
+        { "src": "idle.svg", "ms": 200 }
+      ]
+    },
+    "jump":      { "frames": [{ "src": "sit.svg", "ms": 120 }, { "src": "jump.svg", "ms": 480 }] },
+    "fall":      { "frames": ["fall.svg"], "motion": "flail" },
+    "happy":     { "frames": [{ "src": "happy.svg", "ms": 900 }], "motion": "hop" },
+    "surprised": { "frames": [{ "src": "surprised.svg", "ms": 900 }], "motion": "jolt" },
+    "confused":  { "frames": [{ "src": "confused.svg", "ms": 1600 }], "motion": "tilt" }
+  }
+}

@@ -15,10 +15,25 @@ const Channels = {
   SET_CLICK_THROUGH: 'pet:set-click-through',
   SHOW_CONTEXT_MENU: 'pet:show-context-menu',
   LOG: 'pet:log',
+  GET_CHARACTER: 'pet:get-character',
+  COMMAND: 'pet:command',
 };
 
 contextBridge.exposeInMainWorld('desktopPet', {
   setClickThrough: (enabled) => ipcRenderer.send(Channels.SET_CLICK_THROUGH, enabled === true),
   showContextMenu: () => ipcRenderer.send(Channels.SHOW_CONTEXT_MENU),
   log: (level, message) => ipcRenderer.send(Channels.LOG, level, String(message)),
+
+  // Request/response: resolves with the validated character data (or null).
+  getCharacter: () => ipcRenderer.invoke(Channels.GET_CHARACTER),
+
+  // Subscribe to commands pushed by the main process. Returns an unsubscribe
+  // function. Only the command object is passed on, never the IPC event
+  // (which would give the page a handle to the sender).
+  onCommand: (callback) => {
+    if (typeof callback !== 'function') return () => {};
+    const listener = (_event, command) => callback(command);
+    ipcRenderer.on(Channels.COMMAND, listener);
+    return () => ipcRenderer.removeListener(Channels.COMMAND, listener);
+  },
 });

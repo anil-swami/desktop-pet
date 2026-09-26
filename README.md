@@ -2,7 +2,7 @@
 
 A tiny cartoon creature that lives on your Windows desktop. Built with Electron and vanilla JavaScript.
 
-> **Status:** Phase 1 — a transparent, click-through window with a placeholder character parked on the taskbar.
+> **Status:** Phase 2 — a data-driven animation system with 12 animations. Pip still stands in one place on the taskbar; walking arrives in Phase 3.
 
 ## Requirements
 
@@ -19,8 +19,11 @@ npm install
 
 ```bash
 npm start          # run the pet
-npm run dev        # run with debug logging + detached DevTools for the pet page
+npm run dev        # debug logging + developer items in the right-click menu
+npm test           # unit tests (Node's built-in test runner, no extra dependencies)
 ```
+
+In dev mode, right-click the pet for **Play animation**, **Play all animations**, **Turn around** and **Open DevTools**.
 
 Set the log level explicitly with `PET_LOG_LEVEL` (`debug`, `info`, `warn`, `error`, `silent`):
 
@@ -43,13 +46,24 @@ desktop-pet/
 ├── src/
 │   ├── main/                Main process (Node.js): windows, OS, IPC
 │   │   ├── WindowManager.js     Creates the transparent overlay window, click-through
+│   │   ├── CharacterLoader.js   Reads + validates character.json, fills in fallbacks
+│   │   ├── contextMenu.js       Native right-click menu
 │   │   ├── ipcHandlers.js       Validates and handles messages from the page
 │   │   └── logger.js            Leveled [Pet:scope] logging
 │   └── renderer/            Renderer process (Chromium page, no Node.js)
+│       ├── renderer.js          Entry point: builds the pet, click-through, commands
+│       ├── core/
+│       │   ├── Ticker.js            The single animation loop + timer registry
+│       │   └── logger.js            Forwards renderer logs to the terminal
+│       ├── character/
+│       │   ├── Character.js         The pet as the app sees it (animation, direction, blinking)
+│       │   ├── AnimationController.js  Which frame to show, and when (no DOM)
+│       │   └── CharacterView.js     The only DOM code for the pet
+│       ├── dev/showcase.js      "Play all animations" helper
 │       ├── index.html
-│       ├── renderer.js          Hover detection → click-through toggle, right-click menu
-│       └── styles/main.css
-└── assets/characters/default/pet.svg   Placeholder character
+│       └── styles/              main.css (page), character.css (pet + motions)
+├── assets/characters/default/   Pip: character.json + 13 SVG frames
+└── tests/                   Unit tests (node --test)
 ```
 
 ### The two kinds of process
@@ -71,6 +85,14 @@ preload.cjs ──ipcRenderer.send('pet:set-click-through')──▶ ipcHandlers
 ipcHandlers.js ──validates sender + type──▶ WindowManager.setClickThrough()
 ```
 
+Three IPC styles are used:
+
+| Style | Direction | API | Used for |
+|---|---|---|---|
+| send | page → main | `ipcRenderer.send` / `ipcMain.on` | Fire-and-forget: click-through, logs, show menu |
+| invoke | page → main → page | `ipcRenderer.invoke` / `ipcMain.handle` | Request/response: `await desktopPet.getCharacter()` |
+| push | main → page | `webContents.send` / `ipcRenderer.on` | Commands from the menu (later the tray) |
+
 ### Why one big transparent window?
 
 The pet window covers the whole **work area** (the screen minus the taskbar) but is fully transparent and **click-through**: clicks pass straight to whatever is underneath. The pet is just a DOM element inside the page.
@@ -86,11 +108,78 @@ Click-through works like this:
 
 If the page crashes or hangs while accepting clicks, the main process restores click-through so the invisible window can never block your desktop.
 
+### The animation system
+
+Artwork is **data**, animation logic is **code**, and the two only meet through `character.json`.
+
+```text
+character.json ──CharacterLoader (main)──▶ validated data ──invoke──▶ renderer
+                                                                         │
+Ticker (rAF loop) ──dt──▶ AnimationController ──"show frame X"──▶ CharacterView ──▶ <img>
+```
+
+- **AnimationController** decides which frame is visible from elapsed time (`dt`), handles looping, and switches to the `next` animation when a one-shot ends. `play()` returns a Promise (`true` = finished, `false` = interrupted), so later behaviors can write `await pet.play('jump')`.
+- **CharacterView** is the only code touching the DOM. Flipping left/right is a CSS `scaleX(-1)`.
+- **Ticker** is the single `requestAnimationFrame` loop. It **stops entirely** when nothing is animating: a still idle pose costs zero JavaScript per frame.
+- **Motions** (`breathe`, `bob`, `hop`...) are CSS keyframes layered on top of frames. They run on the GPU compositor.
+- **Blinking** is scheduled by `Character` while idle, every 2.5–6.5 seconds.
+
+## Adding a character
+
+1. Create a folder `assets/characters/<id>/` (`id`: letters, digits, `-` or `_`).
+2. Add your frames: `.png`, `.svg`, `.webp`, `.gif` or `.jpg`, with transparent backgrounds, all drawn facing the same way.
+3. Add `character.json`:
+
+```json
+{
+  "name": "Robo",
+  "size": { "width": 96, "height": 96 },
+  "facing": "right",
+  "animations": {
+    "idle":  { "frames": ["idle.png"], "motion": "breathe" },
+    "walk":  { "frames": ["walk-1.png", "walk-2.png", "walk-3.png"], "fps": 8 },
+    "happy": { "frames": [{ "src": "happy.png", "ms": 900 }], "motion": "hop" },
+    "wave":  { "frames": ["wave-1.png", "wave-2.png"], "fps": 4, "loop": false, "next": "idle" }
+  }
+}
+```
+
+4. Temporarily change `CHARACTER_ID` in `main.js` (a setting in Phase 12), run `npm run dev`, and right-click → **Play all animations**.
+
+| Field | Meaning |
+|---|---|
+| `facing` | Direction your art faces. The engine mirrors it for the other side. |
+| `frames` | File names relative to the folder, or `{ "src", "ms" }` for a per-frame duration. |
+| `fps` | Frame rate when a frame has no `ms` (default 8). |
+| `loop` | Repeat forever, or play once. Defaults depend on the animation (see below). |
+| `next` | Animation to play after a one-shot ends. |
+| `motion` | Optional CSS effect: `breathe`, `breathe-slow`, `bob`, `bounce`, `hop`, `jolt`, `tilt`, `flail`. |
+
+**Only `idle` is required.** Missing standard animations borrow frames from a fallback but keep their own timing rules:
+
+| Animation | Default | Falls back to |
+|---|---|---|
+| `idle` | loop | *(required)* |
+| `blink` | once → idle | idle (blinking is then disabled) |
+| `walk` | loop | idle |
+| `run` | loop | walk |
+| `sit` | loop | idle |
+| `sleep` | loop | sit |
+| `wake` | once → idle | blink |
+| `jump` | once, holds last frame | idle |
+| `fall` | loop | jump |
+| `happy`, `surprised`, `confused` | once → idle | idle |
+
+Extra animations with your own names (like `wave`) are allowed and default to *once → idle*.
+
+Invalid frames (missing file, wrong type, or a path outside the folder) are skipped with a warning in the terminal. The fallback then takes over, so a broken character never crashes the pet.
+
 ## Security
 
 - `contextIsolation: true`, `nodeIntegration: false`, `sandbox: true`: the page has no Node.js access.
-- The preload exposes only three functions on `window.desktopPet`.
+- The preload exposes only five functions on `window.desktopPet`.
 - Every IPC handler checks the sender is the pet window and validates argument types.
+- Character files are read by the main process only. Frame paths cannot leave their character folder.
 - A Content-Security-Policy restricts the page to bundled files. Navigation and popups are blocked.
 
 ## Windows notes and troubleshooting
@@ -102,7 +191,7 @@ If the page crashes or hangs while accepting clicks, the main process restores c
 ## Roadmap
 
 1. ✅ Basic desktop pet: transparent frameless window
-2. Character animation system
+2. ✅ Character animation system
 3. Desktop movement
 4. Multi-monitor support
 5. Mouse interaction

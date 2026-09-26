@@ -7,10 +7,13 @@
         content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self'">
   <title>Desktop Pet</title>
   <link rel="stylesheet" href="styles/main.css">
+  <link rel="stylesheet" href="styles/character.css">
 </head>
 <body>
   <div id="pet" class="pet" role="img" aria-label="Desktop pet">
-    <img class="pet__sprite" src="../../assets/characters/default/pet.svg" alt="" draggable="false">
+    <div class="pet__facing">
+      <img class="pet__sprite" alt="" draggable="false">
+    </div>
   </div>
   <script type="module" src="renderer.js"></script>
 </body>

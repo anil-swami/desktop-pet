@@ -61,7 +61,6 @@ export class WindowManager {
     win.once('ready-to-show', () => {
       win.showInactive(); // show without activating/focusing
       log.info('Pet window visible');
-      if (devTools) win.webContents.openDevTools({ mode: 'detach' });
     });
 
     // Safety net: if the renderer dies or hangs while the window is accepting
@@ -98,6 +97,11 @@ export class WindowManager {
     this.#clickThrough = enabled;
     win.setIgnoreMouseEvents(enabled, { forward: true });
     log.debug(`Click-through ${enabled ? 'ON' : 'OFF'}`);
+  }
+
+  // Only works when the window was created with devTools enabled (npm run dev).
+  openDevTools() {
+    this.petWindow?.webContents.openDevTools({ mode: 'detach' });
   }
 
   isPetWebContents(webContents) {
